@@ -1,5 +1,11 @@
 node_modules/
+dist/
+.turbo/
 .pnpm-store/
 .nerve/
 *.db
+*.db-journal
+web/node_modules/
 web/dist/
+*.docx
+*.doc
