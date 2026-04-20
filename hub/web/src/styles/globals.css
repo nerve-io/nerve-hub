@@ -1,0 +1,238 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Nerve Hub — Design System
+   "一半神经突触，一半电子线路"
+   有机曲线与几何直线的交织 · 生物质感与科技质感的碰撞
+   ═══════════════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  /* ─── Core Palette ─────────────────────────────────────────────────── */
+  /* Background: deep charcoal with warm undertone (organic, not cold) */
+  --bg-primary: #0f1114;
+  --bg-secondary: #161a1f;
+  --bg-tertiary: #1c2128;
+  --bg-elevated: #222830;
+  --bg-hover: #2a313a;
+
+  /* Neural signal: emerald/teal — the pulse of the nervous system */
+  --neural-50: #e6f7f1;
+  --neural-100: #b3e8d4;
+  --neural-200: #80d9b7;
+  --neural-300: #4dca9a;
+  --neural-400: #26bf84;
+  --neural-500: #00b572;
+  --neural-600: #009e63;
+  --neural-700: #008754;
+  --neural-800: #007045;
+  --neural-900: #004d30;
+
+  /* Synapse glow: warm amber — the spark of connection */
+  --synapse-50: #fef8ec;
+  --synapse-100: #fdecc5;
+  --synapse-200: #fce09e;
+  --synapse-300: #fbd477;
+  --synapse-400: #facb58;
+  --synapse-500: #f9c03a;
+  --synapse-600: #e0a520;
+  --synapse-700: #c48a12;
+  --synapse-800: #a8710a;
+  --synapse-900: #7a5206;
+
+  /* Signal danger: coral red */
+  --danger-50: #fde8e8;
+  --danger-100: #f8c4c4;
+  --danger-200: #f39f9f;
+  --danger-300: #ee7b7b;
+  --danger-400: #ea5c5c;
+  --danger-500: #e53e3e;
+  --danger-600: #d32f2f;
+  --danger-700: #b71c1c;
+
+  /* Text hierarchy */
+  --text-primary: #e8ecf1;
+  --text-secondary: #9ba4b0;
+  --text-tertiary: #636d7a;
+  --text-inverse: #0f1114;
+
+  /* Borders & dividers */
+  --border-default: #2a313a;
+  --border-subtle: #1e242c;
+  --border-strong: #3a4450;
+
+  /* ─── Semantic Colors ──────────────────────────────────────────────── */
+  --color-pending: #9ba4b0;
+  --color-running: #00b572;
+  --color-blocked: #e53e3e;
+  --color-waiting: #f9c03a;
+  --color-done: #00b572;
+  --color-failed: #e53e3e;
+  --color-archived: #636d7a;
+
+  --priority-critical: #e53e3e;
+  --priority-high: #f9c03a;
+  --priority-medium: #00b572;
+  --priority-low: #636d7a;
+
+  /* ─── Typography ───────────────────────────────────────────────────── */
+  --font-display: 'Outfit', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  --text-xs: 0.6875rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.25rem;
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+
+  /* ─── Spacing ──────────────────────────────────────────────────────── */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* ─── Radius ───────────────────────────────────────────────────────── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* ─── Shadows ──────────────────────────────────────────────────────── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-glow-neural: 0 0 20px rgba(0, 181, 114, 0.15);
+  --shadow-glow-synapse: 0 0 20px rgba(249, 192, 58, 0.15);
+
+  /* ─── Transitions ──────────────────────────────────────────────────── */
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ─── Layout ───────────────────────────────────────────────────────── */
+  --sidebar-width: 260px;
+  --header-height: 56px;
+}
+
+/* ─── Global Reset ──────────────────────────────────────────────────────── */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-display);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+#root {
+  height: 100vh;
+  overflow: hidden;
+}
+
+a {
+  color: var(--neural-400);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+a:hover { color: var(--neural-300); }
+
+/* ─── Scrollbar ─────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+/* ─── Selection ─────────────────────────────────────────────────────────── */
+
+::selection {
+  background: rgba(0, 181, 114, 0.25);
+  color: var(--text-primary);
+}
+
+/* ─── Focus Ring ────────────────────────────────────────────────────────── */
+
+:focus-visible {
+  outline: 2px solid var(--neural-500);
+  outline-offset: 2px;
+}
+
+/* ─── Utility Classes ───────────────────────────────────────────────────── */
+
+.mono { font-family: var(--font-mono); }
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Neural Pulse Animation ────────────────────────────────────────────── */
+
+@keyframes neural-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes synapse-glow {
+  0%, 100% { box-shadow: 0 0 4px rgba(0, 181, 114, 0.2); }
+  50% { box-shadow: 0 0 12px rgba(0, 181, 114, 0.4); }
+}
+
+@keyframes signal-flow {
+  0% { transform: translateX(-100%); opacity: 0; }
+  50% { opacity: 1; }
+  100% { transform: translateX(100%); opacity: 0; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out forwards;
+}
+
+.animate-slide-in {
+  animation: slide-in-right 0.3s ease-out forwards;
+}

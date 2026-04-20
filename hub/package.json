@@ -1,0 +1,48 @@
+{
+  "name": "@nerve-io/hub",
+  "version": "0.1.0",
+  "description": "AI Agent state bus — the nervous system for multi-agent collaboration",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "nerve-hub": "./dist/cli/index.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "dev": "tsx watch src/cli/index.ts",
+    "build": "tsup",
+    "test": "vitest",
+    "start": "node dist/cli/index.ts start",
+    "mcp": "node dist/cli/index.js mcp"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "mcp",
+    "state-bus",
+    "orchestration"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@fastify/static": "^9.1.2",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "better-sqlite3": "^11.0.0",
+    "commander": "^12.0.0",
+    "fastify": "^5.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^20.0.0",
+    "tsup": "^8.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

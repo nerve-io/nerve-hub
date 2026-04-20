@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.turbo/
+*.db
+*.db-journal
+.nerve/
+web/node_modules/
+web/dist/
