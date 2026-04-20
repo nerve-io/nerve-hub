@@ -39,14 +39,41 @@ pnpm build
 ### 2. 启动
 
 ```bash
-# 启动后端 + Web UI（默认端口 3141）
-pnpm start
+# 初始化数据目录（首次使用，会创建 .nerve/）
+npx nerve-hub init
+
+# 启动 HTTP + Web UI（默认端口 3141）
+npx nerve-hub start
 
 # 浏览器打开
 open http://localhost:3141
 ```
 
-### 3. 开发模式
+打开浏览器后：**新建项目** → 进看板 → **新建任务** → 拖拽卡片切换状态。跟用 Trello 一样。
+
+### 3. CLI 操作
+
+CLI 直接读写本地数据库，不需要启动 HTTP 服务：
+
+```bash
+# 项目管理
+npx nerve-hub project ls                          # 列出所有项目
+npx nerve-hub project create -n "项目名称" -d "描述"  # 创建项目
+npx nerve-hub project board <项目ID>              # 查看看板
+
+# 任务管理
+npx nerve-hub task create --project-id <ID> -t "任务标题" --type code --priority high --assignee claude
+npx nerve-hub task ls --project-id <ID> --status pending   # 查询任务
+npx nerve-hub task claim <任务ID> -a claude                 # 认领任务
+npx nerve-hub task done <任务ID> --result-type git --result-path "https://github.com/..."  # 完成并提交成果
+npx nerve-hub task fail <任务ID> -r "失败原因"               # 标记失败
+npx nerve-hub task context <任务ID>                          # 获取任务上下文（用于注入新会话）
+
+# 事件日志
+npx nerve-hub event ls --project-id <ID>
+```
+
+### 4. 开发模式
 
 ```bash
 # 终端 1：启动后端（热重载）
