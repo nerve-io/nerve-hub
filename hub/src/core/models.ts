@@ -106,7 +106,7 @@ export const UpdateTaskInput = z.object({
   assignee: z.string().optional(),
   progress: z.number().int().min(0).max(100).optional(),
   result: TaskResultSchema.nullable().optional(),
-  error: z.string().nullable().optional(),
+  error: z.string().optional(),
   dependencies: z.array(z.string().uuid()).optional(),
   metadata: z.record(z.unknown()).optional(),
   tags: z.array(z.string()).optional(),
