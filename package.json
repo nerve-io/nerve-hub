@@ -16,9 +16,9 @@
   },
   "scripts": {
     "dev": "tsx watch src/cli/index.ts",
-    "build": "tsup",
+    "build": "tsup && cd web && npm run build",
     "test": "vitest",
-    "start": "node dist/cli/index.ts start",
+    "start": "node dist/cli/index.js start",
     "mcp": "node dist/cli/index.js mcp"
   },
   "keywords": [

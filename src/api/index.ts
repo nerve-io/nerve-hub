@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import type { NerveCore } from "../core/engine.js";
 import { projectRoutes } from "./routes/projects.js";
 import { taskRoutes } from "./routes/tasks.js";
+import { registerMcpSSE } from "./mcp-sse.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -16,6 +17,9 @@ export async function createApp(core: NerveCore) {
   // Register routes with core as plugin options
   await app.register(projectRoutes, { core, prefix: "/api/v1" });
   await app.register(taskRoutes, { core, prefix: "/api/v1" });
+
+  // Register MCP SSE endpoint for remote MCP clients
+  await registerMcpSSE(app, core);
 
   // Health check
   app.get("/health", async () => {

@@ -4,9 +4,7 @@ import { NerveCore } from "../core/engine.js";
 import { registerTools } from "./tools.js";
 import { registerResources } from "./resources.js";
 
-export async function startMcpServer(dbPath: string) {
-  const core = new NerveCore(dbPath);
-
+export function createMcpServer(core: NerveCore) {
   const server = new McpServer(
     {
       name: "nerve-hub",
@@ -22,6 +20,13 @@ export async function startMcpServer(dbPath: string) {
 
   registerTools(server, core);
   registerResources(server, core);
+
+  return server;
+}
+
+export async function startMcpServer(dbPath: string) {
+  const core = new NerveCore(dbPath);
+  const server = createMcpServer(core);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
