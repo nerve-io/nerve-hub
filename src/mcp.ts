@@ -15,6 +15,11 @@ import { z } from "zod";
 import type { TaskDB } from "./db.js";
 
 export async function startMcp(db: TaskDB) {
+  // Keep stdin open so the Node.js event loop never exits prematurely.
+  // This is critical: some MCP clients (e.g. 悟空钉钉) spawn the process
+  // and expect it to stay alive until the client closes the pipe.
+  process.stdin.resume();
+
   const server = new McpServer(
     { name: "nerve-hub", version: "0.1.0" },
     { capabilities: { tools: {} } }
