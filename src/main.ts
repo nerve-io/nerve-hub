@@ -11,9 +11,13 @@
 import { TaskDB } from "./db.js";
 import { createServer } from "./api.js";
 import { startMcp } from "./mcp.js";
-import { resolve } from "path";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 
-const DB_PATH = resolve(process.cwd(), ".nerve", "hub.db");
+// Use the directory of this source file, NOT process.cwd().
+// Claude Desktop spawns MCP processes with cwd=/, which is read-only on macOS.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const DB_PATH = resolve(__dirname, "..", ".nerve", "hub.db");
 
 // ─── Minimal argv parser (no dependencies) ──────────────────────────────────
 
