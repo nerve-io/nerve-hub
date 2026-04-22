@@ -11,7 +11,8 @@
     "dev": "bun run src/main.ts start",
     "start": "bun run src/main.ts start",
     "mcp": "bun run src/main.ts mcp",
-    "test": "bun run src/test.ts"
+    "test": "bun run src/test.ts",
+    "inspect": "npx -y @modelcontextprotocol/inspector bun run src/main.ts mcp"
   },
   "license": "MIT",
   "dependencies": {
