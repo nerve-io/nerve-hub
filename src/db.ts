@@ -2,9 +2,10 @@
  * db.ts — SQLite storage, the only state in the system.
  *
  * One table: tasks. That's it.
+ * Uses bun:sqlite (zero native rebuilds).
  */
 
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 import { randomUUID } from "crypto";
 import { dirname } from "path";
 import { mkdirSync, existsSync } from "fs";
@@ -16,7 +17,7 @@ export interface Task {
   title: string;
   description: string;
   status: "pending" | "done" | "failed";
-  result: string;       // free-form text: summary, URL, whatever the agent wants to leave
+  result: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -36,14 +37,14 @@ export interface UpdateTaskInput {
 // ─── Database ────────────────────────────────────────────────────────────────
 
 export class TaskDB {
-  private db: Database.Database;
+  private db: Database;
 
   constructor(dbPath: string) {
     const dir = dirname(dbPath);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
     this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
+    this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS tasks (
         id          TEXT PRIMARY KEY,

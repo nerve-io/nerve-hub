@@ -1,6 +1,4 @@
 node_modules/
-.pnpm-store/
-hub/
-web/dist/
 dist/
 .nerve/
+.pnpm-store/

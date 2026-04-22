@@ -1,15 +1,13 @@
-#!/usr/bin/env node
-
+#!/usr/bin/env bun
 /**
  * main.ts — Entry point. Two modes:
  *
- *   nerve-hub start [--port 3141]    Start REST API server
- *   nerve-hub mcp                    Start MCP stdio server (for Claude Desktop)
+ *   bun run src/main.ts start [--port 3141]    Start REST API server
+ *   bun run src/main.ts mcp                    Start MCP stdio server
  *
  * Both modes use the same SQLite file: .nerve/hub.db
  */
 
-import { Command } from "commander";
 import { TaskDB } from "./db.js";
 import { createServer } from "./api.js";
 import { startMcp } from "./mcp.js";
@@ -17,50 +15,62 @@ import { resolve } from "path";
 
 const DB_PATH = resolve(process.cwd(), ".nerve", "hub.db");
 
-const program = new Command();
-program.name("nerve-hub").version("0.1.0").description("AI Agent task bus");
+// ─── Minimal argv parser (no dependencies) ──────────────────────────────────
 
-program
-  .command("start")
-  .description("Start REST API server")
-  .option("-p, --port <number>", "Port", "3141")
-  .action(async (opts) => {
+const args = process.argv.slice(2);
+const cmd = args[0];
+
+function getArg(name: string, defaultValue?: string): string | undefined {
+  const idx = args.indexOf(`--${name}`);
+  if (idx !== -1 && idx + 1 < args.length) return args[idx + 1];
+  const shortIdx = args.indexOf(`-${name[0]}`);
+  if (shortIdx !== -1 && shortIdx + 1 < args.length) return args[shortIdx + 1];
+  return defaultValue;
+}
+
+// ─── Routes ─────────────────────────────────────────────────────────────────
+
+if (cmd === "start") {
+  const port = parseInt(getArg("port", "3141")!, 10);
+  const db = new TaskDB(DB_PATH);
+  createServer(db, port);
+
+  const shutdown = () => { db.close(); process.exit(0); };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
+} else if (cmd === "mcp") {
+  // MCP stdio: stdout is reserved for JSON-RPC only.
+  // Redirect all console output to stderr so nothing corrupts the protocol.
+  console.log = (...a: any[]) => process.stderr.write(a.join(" ") + "\n");
+  console.error = (...a: any[]) => process.stderr.write(a.join(" ") + "\n");
+  console.warn = (...a: any[]) => process.stderr.write(a.join(" ") + "\n");
+  console.info = (...a: any[]) => process.stderr.write(a.join(" ") + "\n");
+
+  try {
     const db = new TaskDB(DB_PATH);
-    await createServer(db, parseInt(opts.port, 10));
+    await startMcp(db);
 
     const shutdown = () => { db.close(); process.exit(0); };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
-  });
+  } catch (err) {
+    process.stderr.write(`nerve-hub mcp fatal: ${err}\n`);
+    process.exit(1);
+  }
 
-program
-  .command("mcp")
-  .description("Start MCP stdio server (for Claude Desktop)")
-  .action(async () => {
-    // MCP stdio: stdout is reserved for JSON-RPC only.
-    // Redirect all console output to stderr so nothing corrupts the protocol.
-    console.log = (...args: any[]) => process.stderr.write(args.join(" ") + "\n");
-    console.error = (...args: any[]) => process.stderr.write(args.join(" ") + "\n");
-    console.warn = (...args: any[]) => process.stderr.write(args.join(" ") + "\n");
-    console.info = (...args: any[]) => process.stderr.write(args.join(" ") + "\n");
-
-    try {
-      const db = new TaskDB(DB_PATH);
-      await startMcp(db);
-
-      const shutdown = () => { db.close(); process.exit(0); };
-      process.on("SIGINT", shutdown);
-      process.on("SIGTERM", shutdown);
-    } catch (err) {
-      process.stderr.write(`nerve-hub mcp fatal: ${err}\n`);
-      process.exit(1);
-    }
-  });
+} else {
+  console.log(`nerve-hub v0.2.0 — AI Agent task bus`);
+  console.log(``);
+  console.log(`Usage:`);
+  console.log(`  bun run src/main.ts start [--port 3141]   Start REST API server`);
+  console.log(`  bun run src/main.ts mcp                   Start MCP stdio server`);
+  console.log(`  bun run src/main.ts test                  Run smoke tests`);
+  process.exit(cmd ? 1 : 0);
+}
 
 // Catch unhandled errors — write to stderr, never stdout
 process.on("uncaughtException", (err) => {
   process.stderr.write(`nerve-hub uncaught: ${err.stack || err}\n`);
   process.exit(1);
 });
-
-program.parse();

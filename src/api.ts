@@ -1,5 +1,6 @@
 /**
  * api.ts — REST API. 5 endpoints, no abstractions.
+ * Uses Bun.serve() — zero dependencies.
  *
  * POST   /tasks          — create task
  * GET    /tasks           — list tasks (?status=pending)
@@ -8,50 +9,67 @@
  * DELETE /tasks/:id       — delete task
  */
 
-import Fastify from "fastify";
 import type { TaskDB, CreateTaskInput, UpdateTaskInput } from "./db.js";
 
-export async function createServer(db: TaskDB, port = 3141) {
-  const app = Fastify({ logger: true });
+export function createServer(db: TaskDB, port = 3141) {
+  const server = Bun.serve({
+    port,
+    hostname: "0.0.0.0",
+    fetch(req) {
+      const url = new URL(req.url);
+      const path = url.pathname;
 
-  // ─── Routes ──────────────────────────────────────────────────────────────
+      // ─── Health ──────────────────────────────────────────────────────────
+      if (path === "/health") {
+        return Response.json({ status: "ok" });
+      }
 
-  app.post<{ Body: CreateTaskInput }>("/tasks", async (req, reply) => {
-    const { title, description } = req.body ?? {} as any;
-    if (!title) return reply.status(400).send({ error: "title is required" });
-    const task = db.create({ title, description });
-    return reply.status(201).send(task);
+      // ─── POST /tasks ────────────────────────────────────────────────────
+      if (path === "/tasks" && req.method === "POST") {
+        const body = req.json() as Promise<CreateTaskInput>;
+        return body.then((input) => {
+          if (!input.title) return Response.json({ error: "title is required" }, { status: 400 });
+          const task = db.create(input);
+          return Response.json(task, { status: 201 });
+        });
+      }
+
+      // ─── GET /tasks ─────────────────────────────────────────────────────
+      if (path === "/tasks" && req.method === "GET") {
+        const status = url.searchParams.get("status") || undefined;
+        return Response.json(db.list(status));
+      }
+
+      // ─── GET /tasks/:id ─────────────────────────────────────────────────
+      const taskMatch = path.match(/^\/tasks\/([^/]+)$/);
+      if (taskMatch && req.method === "GET") {
+        const task = db.get(taskMatch[1]);
+        if (!task) return Response.json({ error: "not found" }, { status: 404 });
+        return Response.json(task);
+      }
+
+      // ─── PATCH /tasks/:id ───────────────────────────────────────────────
+      if (taskMatch && req.method === "PATCH") {
+        const body = req.json() as Promise<UpdateTaskInput>;
+        return body.then((input) => {
+          const task = db.update(taskMatch[1], input);
+          if (!task) return Response.json({ error: "not found" }, { status: 404 });
+          return Response.json(task);
+        });
+      }
+
+      // ─── DELETE /tasks/:id ──────────────────────────────────────────────
+      if (taskMatch && req.method === "DELETE") {
+        const ok = db.delete(taskMatch[1]);
+        if (!ok) return Response.json({ error: "not found" }, { status: 404 });
+        return Response.json({ deleted: true });
+      }
+
+      // ─── 404 ────────────────────────────────────────────────────────────
+      return Response.json({ error: "not found" }, { status: 404 });
+    },
   });
 
-  app.get<{ Querystring: { status?: string } }>("/tasks", async (req) => {
-    return db.list(req.query.status);
-  });
-
-  app.get<{ Params: { id: string } }>("/tasks/:id", async (req, reply) => {
-    const task = db.get(req.params.id);
-    if (!task) return reply.status(404).send({ error: "not found" });
-    return task;
-  });
-
-  app.patch<{ Params: { id: string }; Body: UpdateTaskInput }>("/tasks/:id", async (req, reply) => {
-    const task = db.update(req.params.id, req.body);
-    if (!task) return reply.status(404).send({ error: "not found" });
-    return task;
-  });
-
-  app.delete<{ Params: { id: string } }>("/tasks/:id", async (req, reply) => {
-    const ok = db.delete(req.params.id);
-    if (!ok) return reply.status(404).send({ error: "not found" });
-    return { deleted: true };
-  });
-
-  // ─── Health ──────────────────────────────────────────────────────────────
-
-  app.get("/health", async () => ({ status: "ok" }));
-
-  // ─── Start ───────────────────────────────────────────────────────────────
-
-  const address = await app.listen({ port, host: "0.0.0.0" });
-  console.log(`nerve-hub API: ${address}`);
-  return app;
+  console.log(`nerve-hub API: http://localhost:${port}`);
+  return server;
 }
