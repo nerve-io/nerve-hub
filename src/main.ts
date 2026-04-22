@@ -52,14 +52,27 @@ if (cmd === "start") {
   console.info = (...a: any[]) => process.stderr.write(a.join(" ") + "\n");
 
   try {
+    console.log(`Starting MCP server...`);
+    console.log(`DB_PATH: ${DB_PATH}`);
+    console.log(`process.cwd(): ${process.cwd()}`);
+    console.log(`__dirname: ${__dirname}`);
+    
     const db = new TaskDB(DB_PATH);
+    console.log(`Database initialized successfully`);
+    
     await startMcp(db);
+    console.log(`MCP server started successfully`);
 
-    const shutdown = () => { db.close(); process.exit(0); };
+    const shutdown = () => { 
+      console.log(`Shutting down MCP server...`);
+      db.close(); 
+      process.exit(0); 
+    };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
   } catch (err) {
-    process.stderr.write(`nerve-hub mcp fatal: ${err}\n`);
+    console.error(`nerve-hub mcp fatal: ${err}`);
+    console.error(`Error stack: ${err.stack}`);
     process.exit(1);
   }
 
