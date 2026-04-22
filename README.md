@@ -76,3 +76,9 @@ Open the printed URL in your browser to interactively test all tools.
 3. Use MCP Inspector to debug interactively
 4. Check client logs:
    - Claude Desktop: `~/Library/Logs/Claude/mcp*.log`
+
+**钉钉悟空 MCP 初始化错误**
+
+悟空钉钉 MCP STDIO 模式下，**必须确保 MCP 入口文件在该会话可访问的目录下**。如果配置的路径不在悟空钉钉允许访问的目录范围内，将提示初始化错误。
+
+解决方案：在悟空钉钉的 MCP 配置中，将项目目录添加到允许访问的路径列表。
