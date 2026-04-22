@@ -67,7 +67,13 @@ Open the printed URL in your browser to interactively test all tools.
 | `update_task` | Update task fields (status, result, etc.) |
 | `delete_task` | Delete a task |
 
-## Troubleshooting
+## Design Notes
+
+### 异构 Agent 系统的文件边界问题
+
+成熟 Agent 系统（Claude Desktop、钉钉悟空等）都会严格限制自己在用户本地的文件系统边界（sandbox）。这导致异构 Agent 之间难以彼此投送、共享文件。
+
+nerve-hub 的解法：**不共享文件，共享意图**。通过 SQLite 作为唯一的状态中枢，Agent 之间只交换结构化的任务描述（title、description、status、result），而非文件本身。每个 Agent 在自己的沙箱内独立工作，通过任务状态同步协作进度。
 
 **MCP connection fails ("connection closed: initialize response")**
 
