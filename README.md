@@ -75,7 +75,11 @@ Open the printed URL in your browser to interactively test all tools.
 
 nerve-hub 的解法：**不共享文件，共享意图**。通过 SQLite 作为唯一的状态中枢，Agent 之间只交换结构化的任务描述（title、description、status、result），而非文件本身。每个 Agent 在自己的沙箱内独立工作，通过任务状态同步协作进度。
 
-**MCP connection fails ("connection closed: initialize response")**
+## Roadmap
+
+- [ ] **跨 Agent 文件共享** — 成熟 Agent 系统严格限制本地文件系统边界，异构 Agent 之间难以投送、共享文件。需要设计一个安全的文件中转机制（如基于 SQLite blob 存储、或约定共享目录 + 签名验证），让 Agent A 产出的文件能被 Agent B 消费。
+
+## Troubleshooting
 
 1. Verify `bun` is installed: `bun --version`
 2. Run manually to check for errors: `bun run src/main.ts mcp` (should hang waiting for stdin)
