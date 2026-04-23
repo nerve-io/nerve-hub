@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
-import { getTaskContext, updateTask } from '../api';
+import { Link, useNavigate } from 'react-router-dom';
+import { getTaskContext, updateTask, deleteTask } from '../api';
 import { toast } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { InlineEdit } from '@/components/InlineEdit';
 import { MetaRow } from '@/components/MetaRow';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { relativeTime, absoluteTime, statusColor, priorityColor, formatAction } from '../utils';
 import type { TaskContext as TaskContextType, TaskStatus } from '../types';
 
@@ -16,6 +17,9 @@ interface Props {
 export function TaskDetail({ taskId }: Props) {
   const [ctx, setCtx] = useState<TaskContextType | null>(null);
   const [loading, setLoading] = useState(true);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const navigate = useNavigate();
 
   const load = useCallback(async () => {
     try {
@@ -50,6 +54,19 @@ export function TaskDetail({ taskId }: Props) {
     }
   };
 
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await deleteTask(taskId);
+      toast('Task deleted');
+      navigate(project ? `/projects/${project.id}` : '/');
+    } catch (err: any) {
+      toast(err.message);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (loading) {
     return <div className="max-w-[1100px]">Loading…</div>;
   }
@@ -63,7 +80,7 @@ export function TaskDetail({ taskId }: Props) {
   return (
     <div className="max-w-[1100px]">
       <div className="mb-5">
-        <Link to={project ? `/projects/${project.id}` : '/'} className="text-sm text-muted-foreground hover:text-foreground no-underline">
+        <Link to={project ? `/projects/${project.id}` : '/'} className="text-sm text-muted-foreground hover:text-foreground no-underline cursor-pointer focus-visible:ring-2 focus-visible:ring-ring rounded-sm">
           ← Back
         </Link>
       </div>
@@ -76,6 +93,7 @@ export function TaskDetail({ taskId }: Props) {
             onSave={(v) => handleInlineEdit('title', v)}
             className="text-[22px] font-semibold tracking-tight mb-3"
             tag="h1"
+            maxLength={200}
           />
 
           <InlineEdit
@@ -85,6 +103,7 @@ export function TaskDetail({ taskId }: Props) {
             tag="p"
             placeholder="No description"
             multiline
+            maxLength={5000}
           />
 
           <div className="flex gap-2 mb-6 flex-wrap bg-card/40 backdrop-blur-sm rounded-xl p-4 border border-border/50">
@@ -95,12 +114,12 @@ export function TaskDetail({ taskId }: Props) {
             )}
             {(task.status === 'running' || task.status === 'pending') && (
               <Button variant="success" onClick={() => handleStatusChange('done')}>
-                ✓ Complete
+                <svg className="w-4 h-4 inline mr-1 -mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Complete
               </Button>
             )}
             {(task.status === 'running' || task.status === 'pending') && (
               <Button variant="destructive" onClick={() => handleStatusChange('failed')}>
-                ✕ Mark Failed
+                <svg className="w-4 h-4 inline mr-1 -mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>Mark Failed
               </Button>
             )}
             {task.status === 'blocked' && (
@@ -108,6 +127,9 @@ export function TaskDetail({ taskId }: Props) {
                 → Unblock
               </Button>
             )}
+            <Button variant="destructive" onClick={() => setConfirmOpen(true)}>
+              <svg className="w-4 h-4 inline mr-1 -mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>Delete
+            </Button>
           </div>
 
           {(task.status === 'done' || task.status === 'failed') && (
@@ -120,6 +142,7 @@ export function TaskDetail({ taskId }: Props) {
                 tag="div"
                 placeholder="No result"
                 multiline
+                maxLength={5000}
               />
             </div>
           )}
@@ -129,7 +152,7 @@ export function TaskDetail({ taskId }: Props) {
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Blocked By</h3>
               <div className="flex flex-col gap-1">
                 {blockedBy.map((dep) => (
-                  <Link key={dep.id} to={`/tasks/${dep.id}`} className="flex items-center gap-2 px-2.5 py-1.5 bg-white/[0.06] backdrop-blur-sm border border-border rounded-md text-[13px] transition-all hover:border-primary no-underline text-foreground">
+                  <Link key={dep.id} to={`/tasks/${dep.id}`} className="flex items-center gap-2 px-2.5 py-1.5 bg-white/[0.06] backdrop-blur-sm border border-border rounded-md text-[13px] transition-all duration-200 hover:border-primary no-underline text-foreground cursor-pointer focus-visible:ring-2 focus-visible:ring-ring">
                     <span
                       className="w-1.5 h-1.5 rounded-full shrink-0"
                       style={{ background: statusColor(dep.status) }}
@@ -172,7 +195,7 @@ export function TaskDetail({ taskId }: Props) {
                 <MetaRow label="Assignee">{task.assignee || '—'}</MetaRow>
                 {project && (
                   <MetaRow label="Project">
-                    <Link to={`/projects/${project.id}`} className="no-underline">{project.name}</Link>
+                    <Link to={`/projects/${project.id}`} className="no-underline cursor-pointer hover:text-primary">{project.name}</Link>
                   </MetaRow>
                 )}
                 <MetaRow label="Created">{relativeTime(task.createdAt)}</MetaRow>
@@ -208,6 +231,23 @@ export function TaskDetail({ taskId }: Props) {
           </Card>
         </div>
       </div>
+
+      <Dialog open={confirmOpen} onOpenChange={(v) => !v && setConfirmOpen(false)}>
+        <DialogContent className="sm:max-w-[400px] backdrop-blur-xl bg-card/80 border-border/50">
+          <DialogHeader>
+            <DialogTitle>删除任务</DialogTitle>
+            <DialogDescription>
+              确定要删除任务「{task.title}」吗？此操作不可恢复。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 px-6 pb-6">
+            <Button variant="ghost" onClick={() => setConfirmOpen(false)}>取消</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? '删除中...' : '删除'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

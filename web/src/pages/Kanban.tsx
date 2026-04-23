@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { getProjectContext, createTask, updateTask } from '../api';
+import { getProjectContext, getProjectBlockedStatuses, createTask, updateTask } from '../api';
 import { AppDialog } from '@/components/ui/AppDialog';
 import { toast } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,7 @@ interface Props {
 export function Kanban({ projectId }: Props) {
   const [project, setProject] = useState<any>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [blockedByMap, setBlockedByMap] = useState<Record<string, Task[]>>({});
+  const [blockedByMap, setBlockedByMap] = useState<Record<string, boolean>>({});
   const [modalOpen, setModalOpen] = useState(false);
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
   const dragTaskIdRef = useRef<string | null>(null);
@@ -38,19 +38,13 @@ export function Kanban({ projectId }: Props) {
 
   const load = useCallback(async () => {
     try {
-      const ctx = await getProjectContext(projectId);
+      const [ctx, blockedStatuses] = await Promise.all([
+        getProjectContext(projectId),
+        getProjectBlockedStatuses(projectId).catch(() => ({})),
+      ]);
       setProject(ctx.project);
       setTasks(ctx.tasks);
-      const map: Record<string, Task[]> = {};
-      for (const t of ctx.tasks) {
-        if (t.dependencies.length > 0) {
-          try {
-            const res = await fetch(`/api/tasks/${t.id}/blocked-by`);
-            if (res.ok) map[t.id] = await res.json();
-          } catch { /* ignore */ }
-        }
-      }
-      setBlockedByMap(map);
+      setBlockedByMap(blockedStatuses);
     } catch (err: any) {
       toast(err.message);
     }
@@ -171,7 +165,7 @@ export function Kanban({ projectId }: Props) {
             </div>
             <div className="flex-1 overflow-y-auto px-2 pb-2 flex flex-col gap-1.5">
               {col.tasks.map((task) => {
-                const blocked = (blockedByMap[task.id] || []).length > 0;
+                const blocked = blockedByMap[task.id] === true;
                 return (
                   <Link
                     key={task.id}
@@ -216,24 +210,36 @@ export function Kanban({ projectId }: Props) {
       <AppDialog open={modalOpen} onClose={() => setModalOpen(false)} title="New Task">
         <div className="space-y-4 px-6 pb-6">
           <div className="space-y-2">
-            <Label htmlFor="task-title">Title</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="task-title">Title</Label>
+              <span className={`text-[11px] ${formTitle.length > 200 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                {formTitle.length}/200
+              </span>
+            </div>
             <Input
               id="task-title"
               value={formTitle}
               onChange={(e) => setFormTitle(e.target.value)}
               placeholder="Task title"
+              maxLength={200}
               autoFocus
               onKeyDown={(e) => e.key === 'Enter' && handleCreateTask()}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="task-desc">Description</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="task-desc">Description</Label>
+              <span className={`text-[11px] ${formDesc.length > 5000 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                {formDesc.length}/5000
+              </span>
+            </div>
             <Textarea
               id="task-desc"
               value={formDesc}
               onChange={(e) => setFormDesc(e.target.value)}
               placeholder="Optional description"
               rows={2}
+              maxLength={5000}
             />
           </div>
           <div className="flex gap-3">

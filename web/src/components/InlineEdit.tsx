@@ -7,6 +7,7 @@ interface InlineEditProps {
   tag?: 'h1' | 'p' | 'div';
   placeholder?: string;
   multiline?: boolean;
+  maxLength?: number;
 }
 
 export function InlineEdit({
@@ -16,6 +17,7 @@ export function InlineEdit({
   tag: Tag = 'div',
   placeholder = '',
   multiline = false,
+  maxLength,
 }: InlineEditProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -37,39 +39,61 @@ export function InlineEdit({
   }
 
   const save = () => {
+    if (maxLength && draft.length > maxLength) {
+      setDraft(value);
+      setEditing(false);
+      return;
+    }
     setEditing(false);
     if (draft !== value) onSave(draft);
   };
 
   const inputBaseClass = `w-full bg-background border border-primary rounded px-2 py-1 resize-vertical ${className || ''}`;
+  const overLimit = maxLength !== undefined && draft.length > maxLength;
 
   if (multiline) {
     return (
-      <textarea
+      <div>
+        <textarea
+          className={inputBaseClass}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={save}
+          autoFocus
+          maxLength={maxLength}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') { setDraft(value); setEditing(false); }
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save();
+          }}
+        />
+        {maxLength !== undefined && (
+          <div className={`text-[11px] mt-1 ${overLimit ? 'text-destructive' : 'text-muted-foreground'}`}>
+            {draft.length}/{maxLength}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <input
         className={inputBaseClass}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={save}
         autoFocus
+        maxLength={maxLength}
         onKeyDown={(e) => {
+          if (e.key === 'Enter') save();
           if (e.key === 'Escape') { setDraft(value); setEditing(false); }
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save();
         }}
       />
-    );
-  }
-
-  return (
-    <input
-      className={inputBaseClass}
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={save}
-      autoFocus
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') save();
-        if (e.key === 'Escape') { setDraft(value); setEditing(false); }
-      }}
-    />
+      {maxLength !== undefined && (
+        <div className={`text-[11px] mt-1 ${overLimit ? 'text-destructive' : 'text-muted-foreground'}`}>
+          {draft.length}/{maxLength}
+        </div>
+      )}
+    </div>
   );
 }

@@ -27,7 +27,7 @@ function SidebarContent({ projects, currentPath, onNavigate }: SidebarProps & { 
   }, []);
 
   const navLinkClass = (isActive: boolean) =>
-    `block px-2 py-1.5 rounded-md text-sm transition-all truncate cursor-pointer no-underline ${
+    `block px-2 py-1.5 rounded-md text-sm transition-all duration-200 truncate cursor-pointer no-underline ${
       isActive
         ? 'text-primary bg-primary/15 backdrop-blur-sm'
         : 'text-foreground/70 hover:text-foreground hover:bg-white/[0.04]'
@@ -37,7 +37,7 @@ function SidebarContent({ projects, currentPath, onNavigate }: SidebarProps & { 
     <div className="flex flex-col h-full">
       {/* Logo */}
       <div className="flex items-center gap-2 px-4 py-5 text-base font-semibold tracking-tight">
-        <span className="text-xl text-primary drop-shadow-[0_0_8px_hsl(var(--primary)/0.5)]">⬡</span>
+        <svg className="w-5 h-5 text-primary drop-shadow-[0_0_8px_hsl(var(--primary)/0.5)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
         <span className="text-foreground">nerve-hub</span>
       </div>
 
@@ -60,7 +60,7 @@ function SidebarContent({ projects, currentPath, onNavigate }: SidebarProps & { 
           <Link
             key={p.id}
             to={`/projects/${p.id}`}
-            className={`block px-2 py-1.5 rounded-md text-xs transition-all truncate cursor-pointer no-underline ${
+            className={`block px-2 py-1.5 rounded-md text-xs transition-all duration-200 truncate cursor-pointer no-underline ${
               currentPath === `/projects/${p.id}`
                 ? 'text-primary bg-primary/15 backdrop-blur-sm'
                 : 'text-foreground/70 hover:text-foreground hover:bg-white/[0.04]'
@@ -109,7 +109,7 @@ export function Sidebar({ projects, currentPath }: SidebarProps) {
           className="h-8 w-8"
           onClick={() => setSheetOpen(true)}
         >
-          <span className="text-lg">☰</span>
+          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
         </Button>
         <span className="font-semibold tracking-tight">nerve-hub</span>
       </div>

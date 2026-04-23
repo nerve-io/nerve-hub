@@ -40,6 +40,23 @@ function isValidDependencies(val: any): boolean {
   return Array.isArray(val) && val.every((v: any) => typeof v === "string");
 }
 
+const FIELD_LENGTHS: Record<string, number> = {
+  "project.name": 100,
+  "project.description": 2000,
+  "task.title": 200,
+  "task.description": 5000,
+  "task.result": 5000,
+  "task.assignee": 100,
+};
+
+function validateLength(value: string, field: string): string | null {
+  const max = FIELD_LENGTHS[field];
+  if (max !== undefined && typeof value === "string" && value.length > max) {
+    return `${field.split(".").pop()} must be ${max} characters or less`;
+  }
+  return null;
+}
+
 function getActor(req: Request): string {
   return req.headers.get("x-nerve-agent") || "system";
 }
@@ -100,6 +117,12 @@ export function createServer(db: TaskDB, port = 3141) {
           const body = await json(req);
           if (body === null) return badRequest("invalid JSON");
           if (!body.name || typeof body.name !== "string") return badRequest("name is required (string)");
+          const nameErr = validateLength(body.name, "project.name");
+          if (nameErr) return badRequest(nameErr);
+          if (body.description !== undefined) {
+            const descErr = validateLength(body.description, "project.description");
+            if (descErr) return badRequest(descErr);
+          }
           const project = db.createProject(body as CreateProjectInput);
           return Response.json(project, { status: 201 });
         }
@@ -132,13 +155,39 @@ export function createServer(db: TaskDB, port = 3141) {
           return Response.json(ctx);
         }
 
+        // ─── GET /projects/:id/blocked-statuses ─────────────────────────
+        const projectBlockedStatusesMatch = path.match(/^\/projects\/([^/]+)\/blocked-statuses$/);
+        if (projectBlockedStatusesMatch && req.method === "GET") {
+          const project = db.getProject(projectBlockedStatusesMatch[1]);
+          if (!project) return Response.json({ error: "not found" }, { status: 404 });
+          return Response.json(db.getProjectBlockedStatuses(projectBlockedStatusesMatch[1]));
+        }
+
         // ─── POST /tasks ────────────────────────────────────────────────
         if (path === "/tasks" && req.method === "POST") {
           const body = await json(req);
           if (body === null) return badRequest("invalid JSON");
           if (!body.title || typeof body.title !== "string") return badRequest("title is required (string)");
+          const titleErr = validateLength(body.title, "task.title");
+          if (titleErr) return badRequest(titleErr);
+          if (body.description !== undefined) {
+            const descErr = validateLength(body.description, "task.description");
+            if (descErr) return badRequest(descErr);
+          }
+          if (body.assignee !== undefined) {
+            const assigneeErr = validateLength(body.assignee, "task.assignee");
+            if (assigneeErr) return badRequest(assigneeErr);
+          }
+          if (body.result !== undefined) {
+            const resultErr = validateLength(body.result, "task.result");
+            if (resultErr) return badRequest(resultErr);
+          }
           if (body.dependencies !== undefined && !isValidDependencies(body.dependencies)) {
             return badRequest("dependencies must be an array of strings");
+          }
+          if (body.dependencies !== undefined) {
+            const depError = db.validateDependencies(null, body.dependencies);
+            if (depError) return badRequest(depError);
           }
           const actor = getActor(req);
           const task = db.create(body as CreateTaskInput, actor);
@@ -203,8 +252,28 @@ export function createServer(db: TaskDB, port = 3141) {
           if (body.type !== undefined && !VALID_TYPES.has(body.type)) {
             return badRequest(`invalid type: "${body.type}". must be one of: code, review, test, deploy, research, custom`);
           }
+          if (body.title !== undefined) {
+            const titleErr = validateLength(body.title, "task.title");
+            if (titleErr) return badRequest(titleErr);
+          }
+          if (body.description !== undefined) {
+            const descErr = validateLength(body.description, "task.description");
+            if (descErr) return badRequest(descErr);
+          }
+          if (body.assignee !== undefined) {
+            const assigneeErr = validateLength(body.assignee, "task.assignee");
+            if (assigneeErr) return badRequest(assigneeErr);
+          }
+          if (body.result !== undefined) {
+            const resultErr = validateLength(body.result, "task.result");
+            if (resultErr) return badRequest(resultErr);
+          }
           if (body.dependencies !== undefined && !isValidDependencies(body.dependencies)) {
             return badRequest("dependencies must be an array of strings");
+          }
+          if (body.dependencies !== undefined) {
+            const depError = db.validateDependencies(taskMatch[1], body.dependencies);
+            if (depError) return badRequest(depError);
           }
           const actor = getActor(req);
           const task = db.update(taskMatch[1], body as UpdateTaskInput, actor);

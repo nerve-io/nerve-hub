@@ -458,6 +458,59 @@ export class TaskDB {
       .filter((dep): dep is Task => dep !== undefined && dep.status !== "done");
   }
 
+  getProjectBlockedStatuses(projectId: string): Record<string, boolean> {
+    const rows = this.db.prepare(`
+      SELECT t.id,
+        EXISTS(
+          SELECT 1 FROM tasks dep
+          WHERE dep.id IN (
+            SELECT value FROM json_each(t.dependencies)
+          ) AND dep.status != 'done'
+        ) AS is_blocked
+      FROM tasks t
+      WHERE t.project_id = ?
+    `).all(projectId) as any[];
+
+    const result: Record<string, boolean> = {};
+    for (const row of rows) {
+      result[row.id] = row.is_blocked === 1;
+    }
+    return result;
+  }
+
+  validateDependencies(taskId: string | null, deps: string[]): string | null {
+    // 1. 去重检查
+    const unique = new Set(deps);
+    if (unique.size !== deps.length) {
+      return "dependencies contains duplicate IDs";
+    }
+
+    // 2. 自引用检查
+    if (taskId !== null && deps.includes(taskId)) {
+      return "a task cannot depend on itself";
+    }
+
+    // 3. 存在性检查
+    for (const depId of deps) {
+      const dep = this.get(depId);
+      if (!dep) {
+        return `dependency not found: ${depId}`;
+      }
+    }
+
+    // 4. 直接循环检查
+    if (taskId !== null) {
+      for (const depId of deps) {
+        const dep = this.get(depId)!;
+        if (dep.dependencies.includes(taskId)) {
+          return `circular dependency detected: ${taskId} → ${depId} → ${taskId}`;
+        }
+      }
+    }
+
+    return null;
+  }
+
   // ─── Contexts ───────────────────────────────────────────────────────────
 
   getProjectContext(projectId: string): ProjectContext | undefined {

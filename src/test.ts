@@ -691,3 +691,130 @@ describe("get_task_context", () => {
     expect(res.status).toBe(404);
   });
 });
+
+// ─── Batch Blocked Statuses (S1-01) ──────────────────────────────────────────
+
+describe("batch blocked-statuses", () => {
+  test("GET /projects/:id/blocked-statuses → correct map", async () => {
+    const project = await postProject("blocked-project");
+    const dep1 = await postTask("Blocking dep", { projectId: project.id });
+    const dep2 = await postTask("Done dep", { projectId: project.id });
+    await patchTask(dep2.id, { status: "done", result: "Finished" });
+    const task1 = await postTask("Blocked task", { projectId: project.id, dependencies: [dep1.id] });
+    const task2 = await postTask("Unblocked task", { projectId: project.id, dependencies: [dep2.id] });
+    const task3 = await postTask("No deps task", { projectId: project.id });
+
+    const res = await fetch(`${BASE}/projects/${project.id}/blocked-statuses`);
+    expect(res.status).toBe(200);
+    const map = await res.json() as Record<string, boolean>;
+    expect(map[task1.id]).toBe(true);   // dep1 未完成
+    expect(map[task2.id]).toBe(false);  // dep2 已完成
+    expect(map[task3.id]).toBe(false);  // 无依赖
+  });
+
+  test("GET /projects/:id/blocked-statuses → empty project", async () => {
+    const project = await postProject("empty-blocked-project");
+    const res = await fetch(`${BASE}/projects/${project.id}/blocked-statuses`);
+    expect(res.status).toBe(200);
+    const map = await res.json() as Record<string, boolean>;
+    expect(Object.keys(map)).toHaveLength(0);
+  });
+
+  test("GET /projects/:id/blocked-statuses → not found", async () => {
+    const res = await fetch(`${BASE}/projects/nonexistent/blocked-statuses`);
+    expect(res.status).toBe(404);
+  });
+});
+
+// ─── Input Length Validation (S1-03) ──────────────────────────────────────────
+
+describe("input length validation", () => {
+  test("POST /projects with name > 100 chars → 400", async () => {
+    const res = await fetch(`${BASE}/projects`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "a".repeat(101) }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json() as any;
+    expect(body.error).toContain("100 characters or less");
+  });
+
+  test("POST /tasks with title > 200 chars → 400", async () => {
+    const res = await fetch(`${BASE}/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "t".repeat(201) }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json() as any;
+    expect(body.error).toContain("200 characters or less");
+  });
+
+  test("PATCH /tasks/:id with description > 5000 chars → 400", async () => {
+    const task = await postTask("Length test");
+    const { status, body } = await patchTask(task.id, { description: "d".repeat(5001) });
+    expect(status).toBe(400);
+    expect(body.error).toContain("5000 characters or less");
+  });
+
+  test("POST /tasks with assignee > 100 chars → 400", async () => {
+    const res = await fetch(`${BASE}/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Assignee length test", assignee: "a".repeat(101) }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json() as any;
+    expect(body.error).toContain("100 characters or less");
+  });
+});
+
+// ─── Dependency Validation (S1-04) ────────────────────────────────────────────
+
+describe("dependency validation", () => {
+  test("POST /tasks with nonexistent dependency → 400", async () => {
+    const res = await fetch(`${BASE}/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Bad dep", dependencies: ["nonexistent-id"] }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json() as any;
+    expect(body.error).toContain("dependency not found");
+  });
+
+  test("PATCH /tasks/:id self-reference → 400", async () => {
+    const task = await postTask("Self ref");
+    const { status, body } = await patchTask(task.id, { dependencies: [task.id] });
+    expect(status).toBe(400);
+    expect(body.error).toContain("cannot depend on itself");
+  });
+
+  test("POST /tasks with duplicate dependencies → 400", async () => {
+    const dep = await postTask("Dup dep");
+    const res = await fetch(`${BASE}/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Dup test", dependencies: [dep.id, dep.id] }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json() as any;
+    expect(body.error).toContain("duplicate");
+  });
+
+  test("direct circular dependency → 400", async () => {
+    const taskA = await postTask("Task A");
+    const taskB = await postTask("Task B", { dependencies: [taskA.id] });
+    const { status, body } = await patchTask(taskA.id, { dependencies: [taskB.id] });
+    expect(status).toBe(400);
+    expect(body.error).toContain("circular dependency");
+  });
+
+  test("valid dependency → 201", async () => {
+    const dep = await postTask("Valid dep");
+    const task = await postTask("Valid task", { dependencies: [dep.id] });
+    expect(task.dependencies).toHaveLength(1);
+    expect(task.dependencies[0]).toBe(dep.id);
+  });
+});

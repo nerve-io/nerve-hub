@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @layer base {
@@ -9,7 +10,7 @@
     --card-foreground: 0 0% 91%;
     --popover: 225 15% 10%;
     --popover-foreground: 0 0% 91%;
-    --primary: 160 50% 45%;
+    --primary: 217 91% 60%;
     --primary-foreground: 0 0% 100%;
     --secondary: 225 15% 16%;
     --secondary-foreground: 0 0% 91%;
@@ -21,7 +22,7 @@
     --destructive-foreground: 0 0% 100%;
     --border: 225 15% 18%;
     --input: 225 15% 18%;
-    --ring: 160 50% 45%;
+    --ring: 217 91% 60%;
     --radius: 0.75rem;
 
     /* 自定义语义色 */
@@ -47,7 +48,7 @@
     --sidebar-width: 220px;
 
     /* Glassmorphism 光效 */
-    --glow-primary: 160 50% 45%;
+    --glow-primary: 217 91% 60%;
     --glow-secondary: 270 50% 45%;
   }
 }
@@ -83,7 +84,8 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 
 @layer base {
@@ -96,6 +98,9 @@
     font-size: 14px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+  }
+  a:focus-visible, button:focus-visible, [role="button"]:focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
   body::before {
     content: '';
@@ -134,6 +139,14 @@ a {
   text-decoration: none;
 }
 
-a:hover {
-  text-decoration: underline;
+a:hover{text-decoration:underline}
+a:focus-visible{text-decoration:underline}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

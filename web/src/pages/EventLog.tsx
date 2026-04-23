@@ -49,13 +49,13 @@ export function EventLog() {
 
       {events.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 px-5 text-muted-foreground">
-          <div className="text-5xl mb-4 opacity-30">📋</div>
+          <svg className="w-12 h-12 mb-4 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg>
           <div className="text-base font-medium mb-1">No events yet</div>
         </div>
       ) : (
         <div className="flex flex-col">
           {events.map((event) => (
-            <div key={event.id} className="grid grid-cols-[80px_12px_1fr] py-2.5 border-b border-border/50 hover:bg-white/[0.03] transition-colors">
+            <div key={event.id} className="grid grid-cols-[80px_12px_1fr] py-2.5 border-b border-border/50">
               <div className="text-muted-foreground text-[12px] text-right pr-3 pt-0.5" title={absoluteTime(event.createdAt)}>
                 {relativeTime(event.createdAt)}
               </div>
@@ -66,7 +66,7 @@ export function EventLog() {
                   {formatAction(event.action, event.payload)}
                 </div>
                 {event.taskId && (
-                  <Link to={`/tasks/${event.taskId}`} className="text-[12px] text-muted-foreground hover:text-primary no-underline">
+                  <Link to={`/tasks/${event.taskId}`} className="text-[12px] text-muted-foreground hover:text-primary no-underline cursor-pointer focus-visible:ring-2 focus-visible:ring-ring rounded-sm">
                     View task →
                   </Link>
                 )}

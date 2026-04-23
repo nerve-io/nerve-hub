@@ -152,6 +152,34 @@ function mockApiPlugin(): Plugin {
           res.end(JSON.stringify({ project: p, tasks, stats: { total: tasks.length, byStatus } }));
           return;
         }
+        const projectBlockedStatusesMatch = path.match(/^\/projects\/([^/]+)\/blocked-statuses$/);
+        if (projectBlockedStatusesMatch && method === 'GET') {
+          const p = PROJECTS.find((x) => x.id === projectBlockedStatusesMatch[1]);
+          if (!p) { res.statusCode = 404; res.end(JSON.stringify({ error: 'not found' })); return; }
+          const tasks = TASKS.filter((t) => t.projectId === p.id);
+          const map: Record<string, boolean> = {};
+          for (const t of tasks) {
+            if (t.dependencies.length > 0) {
+              map[t.id] = t.dependencies.some((depId) => {
+                const dep = TASKS.find((x) => x.id === depId);
+                return dep && dep.status !== 'done';
+              });
+            } else {
+              map[t.id] = false;
+            }
+          }
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify(map));
+          return;
+        }
+        if (projectMatch && method === 'DELETE') {
+          const idx = PROJECTS.findIndex((x) => x.id === projectMatch[1]);
+          if (idx === -1) { res.statusCode = 404; res.end(JSON.stringify({ error: 'not found' })); return; }
+          PROJECTS.splice(idx, 1);
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ deleted: true }));
+          return;
+        }
 
         // ─── Tasks ────────────────────────────────────────────────
         if (path === '/tasks' && method === 'GET') {

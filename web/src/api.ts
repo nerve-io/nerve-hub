@@ -39,6 +39,8 @@ export const deleteProject = (id: string) =>
   request<{ deleted: boolean }>(`/projects/${id}`, { method: 'DELETE' });
 export const getProjectContext = (id: string) =>
   request<ProjectContext>(`/projects/${id}/context`);
+export const getProjectBlockedStatuses = (id: string) =>
+  request<Record<string, boolean>>(`/projects/${id}/blocked-statuses`);
 
 // ─── Tasks ───────────────────────────────────────────────────────────────────
 
