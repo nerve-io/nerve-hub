@@ -1,72 +1,231 @@
 /**
- * api.ts — REST API. 5 endpoints, no abstractions.
+ * api.ts — REST API. No abstractions.
  * Uses Bun.serve() — zero dependencies.
  *
- * POST   /tasks          — create task
- * GET    /tasks           — list tasks (?status=pending)
- * GET    /tasks/:id       — get task
- * PATCH  /tasks/:id       — update task
- * DELETE /tasks/:id       — delete task
+ * Projects:
+ *   POST   /projects          — create project
+ *   GET    /projects          — list projects
+ *   GET    /projects/:id      — get project
+ *   DELETE /projects/:id      — delete project
+ *   GET    /projects/:id/context — project context (tasks + stats)
+ *
+ * Tasks:
+ *   POST   /tasks             — create task
+ *   GET    /tasks             — list tasks (?projectId=&status=&priority=&type=&assignee=)
+ *   GET    /tasks/:id         — get task
+ *   GET    /tasks/:id/context — task context (project + blockedBy + events)
+ *   GET    /tasks/:id/blocked-by — get unfinished dependencies
+ *   PATCH  /tasks/:id         — update task
+ *   DELETE /tasks/:id         — delete task
+ *
+ * Events:
+ *   GET    /events            — list events (?projectId=&taskId=&limit=)
  */
 
-import type { TaskDB, CreateTaskInput, UpdateTaskInput } from "./db.js";
+import type { TaskDB, CreateTaskInput, CreateProjectInput, UpdateTaskInput } from "./db.js";
+
+const VALID_STATUSES = new Set(["pending", "running", "done", "failed", "blocked"]);
+const VALID_PRIORITIES = new Set(["critical", "high", "medium", "low"]);
+const VALID_TYPES = new Set(["code", "review", "test", "deploy", "research", "custom"]);
+
+function json(req: Request): Promise<any> {
+  return req.json().catch(() => null);
+}
+
+function badRequest(message: string): Response {
+  return Response.json({ error: message }, { status: 400 });
+}
+
+function isValidDependencies(val: any): boolean {
+  return Array.isArray(val) && val.every((v: any) => typeof v === "string");
+}
+
+function getActor(req: Request): string {
+  return req.headers.get("x-nerve-agent") || "system";
+}
 
 export function createServer(db: TaskDB, port = 3141) {
   const server = Bun.serve({
     port,
     hostname: "0.0.0.0",
-    fetch(req) {
-      const url = new URL(req.url);
-      const path = url.pathname;
+    async fetch(req) {
+      try {
+        const url = new URL(req.url);
+        const rawPath = url.pathname;
 
-      // ─── Health ──────────────────────────────────────────────────────────
-      if (path === "/health") {
-        return Response.json({ status: "ok" });
-      }
+        // ─── Strip /api prefix (frontend uses /api/* for all requests) ───
+        const path = rawPath.startsWith("/api/")
+          ? rawPath.slice(4)
+          : rawPath === "/api"
+          ? "/"
+          : rawPath;
 
-      // ─── POST /tasks ────────────────────────────────────────────────────
-      if (path === "/tasks" && req.method === "POST") {
-        const body = req.json() as Promise<CreateTaskInput>;
-        return body.then((input) => {
-          if (!input.title) return Response.json({ error: "title is required" }, { status: 400 });
-          const task = db.create(input);
+        // ─── Static files (serve web/dist/ for non-/api paths) ──────────
+        if (!rawPath.startsWith("/api")) {
+          const distPath = new URL("../../web/dist", import.meta.url).pathname;
+          // Serve index.html for SPA routes
+          const filePath = rawPath === "/" || !rawPath.includes(".")
+            ? `${distPath}/index.html`
+            : `${distPath}${rawPath}`;
+          const file = Bun.file(filePath);
+          if (await file.exists()) {
+            return new Response(file);
+          }
+          // Fallback to index.html for client-side routing
+          const indexFile = Bun.file(`${distPath}/index.html`);
+          if (await indexFile.exists()) {
+            return new Response(indexFile, { headers: { "Content-Type": "text/html" } });
+          }
+        }
+
+        // ─── Health ──────────────────────────────────────────────────────
+        if (path === "/health") {
+          return Response.json({ status: "ok" });
+        }
+
+        // ─── GET /events ────────────────────────────────────────────────
+        if (path === "/events" && req.method === "GET") {
+          const projectId = url.searchParams.get("projectId") || undefined;
+          const taskId = url.searchParams.get("taskId") || undefined;
+          const limitParam = url.searchParams.get("limit");
+          const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+          if (limitParam && (isNaN(limit!) || limit! < 1)) {
+            return badRequest("limit must be a positive integer");
+          }
+          return Response.json(db.getEvents({ projectId, taskId, limit }));
+        }
+
+        // ─── POST /projects ─────────────────────────────────────────────
+        if (path === "/projects" && req.method === "POST") {
+          const body = await json(req);
+          if (body === null) return badRequest("invalid JSON");
+          if (!body.name || typeof body.name !== "string") return badRequest("name is required (string)");
+          const project = db.createProject(body as CreateProjectInput);
+          return Response.json(project, { status: 201 });
+        }
+
+        // ─── GET /projects ──────────────────────────────────────────────
+        if (path === "/projects" && req.method === "GET") {
+          return Response.json(db.listProjects());
+        }
+
+        // ─── GET /projects/:id ──────────────────────────────────────────
+        const projectMatch = path.match(/^\/projects\/([^/]+)$/);
+        if (projectMatch && req.method === "GET") {
+          const project = db.getProject(projectMatch[1]);
+          if (!project) return Response.json({ error: "not found" }, { status: 404 });
+          return Response.json(project);
+        }
+
+        // ─── DELETE /projects/:id ───────────────────────────────────────
+        if (projectMatch && req.method === "DELETE") {
+          const ok = db.deleteProject(projectMatch[1]);
+          if (!ok) return Response.json({ error: "not found" }, { status: 404 });
+          return Response.json({ deleted: true });
+        }
+
+        // ─── GET /projects/:id/context ──────────────────────────────────
+        const projectContextMatch = path.match(/^\/projects\/([^/]+)\/context$/);
+        if (projectContextMatch && req.method === "GET") {
+          const ctx = db.getProjectContext(projectContextMatch[1]);
+          if (!ctx) return Response.json({ error: "not found" }, { status: 404 });
+          return Response.json(ctx);
+        }
+
+        // ─── POST /tasks ────────────────────────────────────────────────
+        if (path === "/tasks" && req.method === "POST") {
+          const body = await json(req);
+          if (body === null) return badRequest("invalid JSON");
+          if (!body.title || typeof body.title !== "string") return badRequest("title is required (string)");
+          if (body.dependencies !== undefined && !isValidDependencies(body.dependencies)) {
+            return badRequest("dependencies must be an array of strings");
+          }
+          const actor = getActor(req);
+          const task = db.create(body as CreateTaskInput, actor);
           return Response.json(task, { status: 201 });
-        });
-      }
+        }
 
-      // ─── GET /tasks ─────────────────────────────────────────────────────
-      if (path === "/tasks" && req.method === "GET") {
-        const status = url.searchParams.get("status") || undefined;
-        return Response.json(db.list(status));
-      }
+        // ─── GET /tasks ─────────────────────────────────────────────────
+        if (path === "/tasks" && req.method === "GET") {
+          const projectId = url.searchParams.get("projectId") || undefined;
+          const status = url.searchParams.get("status") || undefined;
+          const priority = url.searchParams.get("priority") || undefined;
+          const type = url.searchParams.get("type") || undefined;
+          const assignee = url.searchParams.get("assignee") || undefined;
 
-      // ─── GET /tasks/:id ─────────────────────────────────────────────────
-      const taskMatch = path.match(/^\/tasks\/([^/]+)$/);
-      if (taskMatch && req.method === "GET") {
-        const task = db.get(taskMatch[1]);
-        if (!task) return Response.json({ error: "not found" }, { status: 404 });
-        return Response.json(task);
-      }
+          if (status && !VALID_STATUSES.has(status)) {
+            return badRequest(`invalid status: "${status}". must be one of: pending, running, done, failed, blocked`);
+          }
+          if (priority && !VALID_PRIORITIES.has(priority)) {
+            return badRequest(`invalid priority: "${priority}". must be one of: critical, high, medium, low`);
+          }
+          if (type && !VALID_TYPES.has(type)) {
+            return badRequest(`invalid type: "${type}". must be one of: code, review, test, deploy, research, custom`);
+          }
 
-      // ─── PATCH /tasks/:id ───────────────────────────────────────────────
-      if (taskMatch && req.method === "PATCH") {
-        const body = req.json() as Promise<UpdateTaskInput>;
-        return body.then((input) => {
-          const task = db.update(taskMatch[1], input);
+          return Response.json(db.list({ projectId, status, priority, type, assignee }));
+        }
+
+        // ─── GET /tasks/:id ─────────────────────────────────────────────
+        const taskMatch = path.match(/^\/tasks\/([^/]+)$/);
+        if (taskMatch && req.method === "GET") {
+          const task = db.get(taskMatch[1]);
           if (!task) return Response.json({ error: "not found" }, { status: 404 });
           return Response.json(task);
-        });
-      }
+        }
 
-      // ─── DELETE /tasks/:id ──────────────────────────────────────────────
-      if (taskMatch && req.method === "DELETE") {
-        const ok = db.delete(taskMatch[1]);
-        if (!ok) return Response.json({ error: "not found" }, { status: 404 });
-        return Response.json({ deleted: true });
-      }
+        // ─── GET /tasks/:id/context ─────────────────────────────────────
+        const taskContextMatch = path.match(/^\/tasks\/([^/]+)\/context$/);
+        if (taskContextMatch && req.method === "GET") {
+          const ctx = db.getTaskContext(taskContextMatch[1]);
+          if (!ctx) return Response.json({ error: "not found" }, { status: 404 });
+          return Response.json(ctx);
+        }
 
-      // ─── 404 ────────────────────────────────────────────────────────────
-      return Response.json({ error: "not found" }, { status: 404 });
+        // ─── GET /tasks/:id/blocked-by ──────────────────────────────────
+        const blockedByMatch = path.match(/^\/tasks\/([^/]+)\/blocked-by$/);
+        if (blockedByMatch && req.method === "GET") {
+          const task = db.get(blockedByMatch[1]);
+          if (!task) return Response.json({ error: "not found" }, { status: 404 });
+          return Response.json(db.getBlockedBy(blockedByMatch[1]));
+        }
+
+        // ─── PATCH /tasks/:id ───────────────────────────────────────────
+        if (taskMatch && req.method === "PATCH") {
+          const body = await json(req);
+          if (body === null) return badRequest("invalid JSON");
+          if (body.status !== undefined && !VALID_STATUSES.has(body.status)) {
+            return badRequest(`invalid status: "${body.status}". must be one of: pending, running, done, failed, blocked`);
+          }
+          if (body.priority !== undefined && !VALID_PRIORITIES.has(body.priority)) {
+            return badRequest(`invalid priority: "${body.priority}". must be one of: critical, high, medium, low`);
+          }
+          if (body.type !== undefined && !VALID_TYPES.has(body.type)) {
+            return badRequest(`invalid type: "${body.type}". must be one of: code, review, test, deploy, research, custom`);
+          }
+          if (body.dependencies !== undefined && !isValidDependencies(body.dependencies)) {
+            return badRequest("dependencies must be an array of strings");
+          }
+          const actor = getActor(req);
+          const task = db.update(taskMatch[1], body as UpdateTaskInput, actor);
+          if (!task) return Response.json({ error: "not found" }, { status: 404 });
+          return Response.json(task);
+        }
+
+        // ─── DELETE /tasks/:id ──────────────────────────────────────────
+        if (taskMatch && req.method === "DELETE") {
+          const actor = getActor(req);
+          const ok = db.delete(taskMatch[1], actor);
+          if (!ok) return Response.json({ error: "not found" }, { status: 404 });
+          return Response.json({ deleted: true });
+        }
+
+        // ─── 404 ────────────────────────────────────────────────────────
+        return Response.json({ error: "not found" }, { status: 404 });
+      } catch (err) {
+        console.error(`[api] unhandled: ${err}`);
+        return Response.json({ error: "internal server error" }, { status: 500 });
+      }
     },
   });
 

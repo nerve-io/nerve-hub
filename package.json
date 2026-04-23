@@ -1,26 +1,29 @@
 {
   "name": "@nerve-io/hub",
   "version": "0.2.0",
-  "description": "AI Agent task bus — minimal state hub for multi-agent collaboration",
+  "description": "AI Agent task bus — the nervous system for multi-agent collaboration",
   "type": "module",
-  "main": "./src/main.ts",
-  "bin": {
-    "nerve-hub": "./src/main.ts"
-  },
   "scripts": {
     "dev": "bun run src/main.ts start",
     "start": "bun run src/main.ts start",
     "mcp": "bun run src/main.ts mcp",
-    "test": "bun run src/test.ts",
+    "test": "bun test src/test.ts",
     "inspect": "npx -y @modelcontextprotocol/inspector bun run src/main.ts mcp"
   },
+  "keywords": [
+    "ai",
+    "agent",
+    "mcp",
+    "task-bus",
+    "orchestration"
+  ],
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
-    "@types/bun": "^1.0.0",
+    "@types/bun": "^1.1.0",
     "typescript": "^5.5.0"
   }
 }

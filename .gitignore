@@ -1,4 +1,10 @@
 node_modules/
 dist/
 .nerve/
-.pnpm-store/
+*.db
+*.db-journal
+*.tsbuildinfo
+.agent/
+.trae/
+t.sh
+web/package-lock.json

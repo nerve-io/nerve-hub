@@ -1,94 +1,233 @@
-# nerve-hub
+<p align="center">
+  <strong>Nerve Hub</strong>
+</p>
 
-AI Agent task bus — minimal state hub for multi-agent collaboration.
+<p align="center">
+  AI Agent 任务总线 — 多智能体协作的神经系统
+</p>
 
-## Quick Start
+<p align="center">
+  <a href="#快速开始">快速开始</a> · <a href="#rest-api">REST API</a> · <a href="#mcp-工具">MCP 工具</a> · <a href="#数据模型">数据模型</a> · <a href="#开发">开发</a>
+</p>
+
+---
+
+## 这是什么
+
+Nerve Hub 是一个轻量级的 **AI Agent 任务协作中心**。
+
+它提供 REST API 和 MCP Server 两种接口，让多个 AI Agent（Claude、Cursor、GPT 等）可以创建任务、认领任务、提交成果、查询进度。数据存储在本地 SQLite 文件中，零外部依赖。
+
+**核心能力：**
+- 📋 **任务 CRUD** — 创建、查询、更新、删除任务
+- 🏷️ **负责人追踪** — assignee 字段，按 Agent 过滤任务
+- 🤖 **MCP Server** — 7 个工具，含 `claim_task` / `complete_task` 语义化操作
+- 🌐 **REST API** — 标准 HTTP 接口，支持 status + assignee 组合过滤
+- 💾 **本地存储** — bun:sqlite 单文件，无需数据库服务
+
+## 快速开始
+
+### 前置条件
+
+- [Bun](https://bun.sh/) >= 1.0
+
+### 安装
 
 ```bash
+git clone git@github.com:nerve-io/nerve-hub.git
+cd nerve-hub
 bun install
-bun test                    # Run smoke tests
-bun run src/main.ts start   # REST API on :3141
-bun run src/main.ts mcp     # MCP stdio server
 ```
 
-## MCP Server Configuration
+### 启动 REST API
 
-### Claude Desktop
+```bash
+bun run src/main.ts start          # 默认端口 3141
+bun run src/main.ts start --port 8080
+```
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+### 启动 MCP Server
+
+```bash
+bun run src/main.ts mcp
+```
+
+### 运行测试
+
+```bash
+bun test src/test.ts
+```
+
+## REST API
+
+Base URL: `http://localhost:3141`
+
+所有请求和响应均为 JSON。
+
+### 健康检查
+
+```bash
+curl http://localhost:3141/health
+# {"status":"ok"}
+```
+
+### 创建任务
+
+```bash
+curl -X POST http://localhost:3141/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"title": "实现登录接口", "description": "OAuth2 flow", "assignee": "claude"}'
+# → 201 {"id": "...", "title": "实现登录接口", "status": "pending", "assignee": "claude", ...}
+```
+
+### 查询任务
+
+```bash
+# 列出所有任务
+curl http://localhost:3141/tasks
+
+# 按状态过滤
+curl http://localhost:3141/tasks?status=pending
+
+# 按负责人过滤
+curl http://localhost:3141/tasks?assignee=claude
+
+# 组合过滤
+curl http://localhost:3141/tasks?status=running&assignee=claude
+
+# 获取单个任务
+curl http://localhost:3141/tasks/{id}
+```
+
+### 更新任务
+
+```bash
+curl -X PATCH http://localhost:3141/tasks/{id} \
+  -H "Content-Type: application/json" \
+  -d '{"status": "done", "result": "PR #42 merged"}'
+```
+
+可更新字段：`title`、`description`、`status`、`assignee`、`result`
+
+### 删除任务
+
+```bash
+curl -X DELETE http://localhost:3141/tasks/{id}
+# → {"deleted": true}
+```
+
+## MCP 工具
+
+Nerve Hub 提供 7 个 MCP 工具，分为通用操作和语义化快捷操作两类：
+
+### 通用操作
+
+| 工具 | 说明 |
+|------|------|
+| `create_task` | 创建任务（title, description?, assignee?） |
+| `list_tasks` | 列出任务，可按 status 和/或 assignee 过滤 |
+| `get_task` | 获取单个任务详情 |
+| `update_task` | 更新任务字段（title?, description?, status?, assignee?, result?） |
+| `delete_task` | 删除任务 |
+
+### 语义化快捷操作
+
+| 工具 | 说明 |
+|------|------|
+| `claim_task` | 认领任务：原子设置 status=running + assignee，Agent 开始工作前调用 |
+| `complete_task` | 完成任务：原子设置 status=done + result，Agent 完成工作后调用 |
+
+> `claim_task` 和 `complete_task` 各自是一次 `db.update()` 调用，保证原子性。推荐 Agent 优先使用这两个工具，而非手动 `update_task`。
+
+### Claude Desktop 配置
+
+在 `claude_desktop_config.json` 中添加：
 
 ```json
 {
   "mcpServers": {
     "nerve-hub": {
       "command": "bun",
-      "args": ["run", "/absolute/path/to/turing-hub/src/main.ts", "mcp"]
+      "args": ["/absolute/path/to/nerve-hub/src/main.ts", "mcp"]
     }
   }
 }
 ```
 
-Replace `/absolute/path/to/turing-hub` with your actual project path.
+> **注意**：必须使用绝对路径，因为 Claude Desktop 的 cwd 不可预测。
 
-Then restart Claude Desktop. A hammer icon 🔨 will appear in the bottom-right of the input box — click it to verify the 5 tools are loaded.
+## 数据模型
 
-### 悟空钉钉 / Other MCP Clients
+### Task
 
-- **Command**: `bun`
-- **Args**: `run /absolute/path/to/turing-hub/src/main.ts mcp`
-- **CWD** (if required): `/absolute/path/to/turing-hub`
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | string | UUID，自动生成 |
+| `title` | string | 任务标题（必填） |
+| `description` | string | 任务描述 |
+| `status` | `"pending"` \| `"running"` \| `"done"` \| `"failed"` \| `"blocked"` | 任务状态，默认 `pending` |
+| `assignee` | string | 负责人（Agent 名称或人名），默认空 |
+| `result` | string | 任务成果 |
+| `createdAt` | string | ISO 8601 创建时间 |
+| `updatedAt` | string | ISO 8601 更新时间 |
 
-### Debug with MCP Inspector
+### 状态流转
 
-```bash
-npx @modelcontextprotocol/inspector bun run src/main.ts mcp
+```
+pending  → running  → done
+                  → failed
+pending  → blocked → running
+任意状态 → pending（重置）
 ```
 
-Open the printed URL in your browser to interactively test all tools.
+典型多 Agent 协作流程：
 
-## REST API
+```
+Agent A: create_task(title, assignee="claude")     → pending
+Agent B: claim_task(id, assignee="claude")          → running
+Agent B: complete_task(id, result="PR merged")      → done
+```
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/tasks` | Create a task |
-| GET | `/tasks` | List tasks (`?status=pending\|done\|failed`) |
-| GET | `/tasks/:id` | Get a task |
-| PATCH | `/tasks/:id` | Update a task |
-| DELETE | `/tasks/:id` | Delete a task |
-| GET | `/health` | Health check |
+## 项目结构
 
-## MCP Tools
+```
+nerve-hub/
+├── src/
+│   ├── main.ts    # 入口（start / mcp 两种模式）
+│   ├── db.ts      # bun:sqlite 存储层（TaskDB）
+│   ├── api.ts     # Bun.serve() REST API
+│   ├── mcp.ts     # MCP stdio server（7 个工具）
+│   └── test.ts    # bun:test 冒烟测试（17 个用例）
+├── skills/        # Claude Code Skill
+│   └── nerve-hub/
+│       ├── SKILL.md
+│       ├── reference.md
+│       └── scripts/nerve.sh
+├── package.json
+├── tsconfig.json
+└── bun.lock
+```
 
-| Tool | Description |
-|------|-------------|
-| `create_task` | Create a new task (title, description?) |
-| `list_tasks` | List tasks (status?: pending/done/failed) |
-| `get_task` | Get a task by ID |
-| `update_task` | Update task fields (status, result, etc.) |
-| `delete_task` | Delete a task |
+## 技术栈
 
-## Design Notes
+| 层 | 技术 |
+|---|---|
+| 运行时 | Bun |
+| HTTP | Bun.serve()（零依赖） |
+| 数据库 | bun:sqlite（Bun 内置） |
+| 数据校验 | Zod（MCP schema） |
+| MCP SDK | @modelcontextprotocol/sdk |
+| 测试 | bun:test（Bun 内置） |
 
-### 异构 Agent 系统的文件边界问题
+## 开发
 
-成熟 Agent 系统（Claude Desktop、钉钉悟空等）都会严格限制自己在用户本地的文件系统边界（sandbox）。这导致异构 Agent 之间难以彼此投送、共享文件。
+```bash
+bun install                    # 安装依赖
+bun run src/main.ts start      # 启动 API 服务
+bun run src/main.ts mcp        # 启动 MCP 服务
+bun test src/test.ts           # 运行测试
+```
 
-nerve-hub 的解法：**不共享文件，共享意图**。通过 SQLite 作为唯一的状态中枢，Agent 之间只交换结构化的任务描述（title、description、status、result），而非文件本身。每个 Agent 在自己的沙箱内独立工作，通过任务状态同步协作进度。
+## License
 
-## Roadmap
-
-- [ ] **跨 Agent 文件共享** — 成熟 Agent 系统严格限制本地文件系统边界，异构 Agent 之间难以投送、共享文件。需要设计一个安全的文件中转机制（如基于 SQLite blob 存储、或约定共享目录 + 签名验证），让 Agent A 产出的文件能被 Agent B 消费。
-
-## Troubleshooting
-
-1. Verify `bun` is installed: `bun --version`
-2. Run manually to check for errors: `bun run src/main.ts mcp` (should hang waiting for stdin)
-3. Use MCP Inspector to debug interactively
-4. Check client logs:
-   - Claude Desktop: `~/Library/Logs/Claude/mcp*.log`
-
-**钉钉悟空 MCP 初始化错误**
-
-悟空钉钉 MCP STDIO 模式下，**必须确保 MCP 入口文件在该会话可访问的目录下**。如果配置的路径不在悟空钉钉允许访问的目录范围内，将提示初始化错误。
-
-解决方案：在悟空钉钉的 MCP 配置中，将项目目录添加到允许访问的路径列表。
+MIT
