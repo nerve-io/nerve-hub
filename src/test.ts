@@ -526,19 +526,19 @@ describe("task dependencies", () => {
 // ─── DB Migrations ────────────────────────────────────────────────────────────
 
 describe("db migrations", () => {
-  test("fresh DB: migrations table exists and version is 6", () => {
-    expect(db.getMigrationVersion()).toBe(6);
+  test("fresh DB: migrations table exists and version is 7", () => {
+    expect(db.getMigrationVersion()).toBe(7);
   });
 
-  test("fresh DB: all 6 migrations recorded", () => {
+  test("fresh DB: all 7 migrations recorded", () => {
     // We can't query migrations table directly, but we can verify the version
-    expect(db.getMigrationVersion()).toBe(6);
+    expect(db.getMigrationVersion()).toBe(7);
   });
 
   test("idempotent: reopening the same DB does not throw", () => {
     // Open the same DB file again — migrations should be a no-op
     const db2 = new TaskDB(TEST_DB);
-    expect(db2.getMigrationVersion()).toBe(6);
+    expect(db2.getMigrationVersion()).toBe(7);
     db2.close();
   });
 
@@ -816,5 +816,268 @@ describe("dependency validation", () => {
     const task = await postTask("Valid task", { dependencies: [dep.id] });
     expect(task.dependencies).toHaveLength(1);
     expect(task.dependencies[0]).toBe(dep.id);
+  });
+});
+
+// ─── WebSocket Real-time Push (S2-01) ────────────────────────────────────────
+
+describe("websocket realtime push", () => {
+  test("WS connection establishes and receives task.created event", async () => {
+    const ws = new WebSocket(`ws://localhost:${PORT}/ws`);
+    await new Promise<void>((resolve, reject) => {
+      ws.onopen = () => resolve();
+      ws.onerror = () => reject(new Error("WS connection failed"));
+    });
+
+    const msgPromise = new Promise<string>((resolve) => {
+      ws.onmessage = (e) => resolve(typeof e.data === "string" ? e.data : "");
+    });
+
+    await postTask("WS test task");
+
+    const msg = await msgPromise;
+    const event = JSON.parse(msg);
+    expect(event.type).toBe("task.created");
+    expect(event.taskId).toBeDefined();
+
+    ws.close();
+  });
+
+  test("WS receives task.updated event on PATCH", async () => {
+    const ws = new WebSocket(`ws://localhost:${PORT}/ws`);
+    await new Promise<void>((resolve) => { ws.onopen = () => resolve(); });
+
+    // Create task first (will trigger task.created, which we ignore)
+    const task = await postTask("WS update test");
+    // Drain any pending messages from creation
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Now set up listener for the update
+    const msgPromise = new Promise<string>((resolve) => {
+      ws.onmessage = (e) => resolve(typeof e.data === "string" ? e.data : "");
+    });
+
+    await patchTask(task.id, { status: "running" });
+
+    const msg = await msgPromise;
+    const event = JSON.parse(msg);
+    expect(event.type).toBe("task.updated");
+    expect(event.taskId).toBe(task.id);
+
+    ws.close();
+  });
+
+  test("WS receives task.deleted event on DELETE", async () => {
+    const ws = new WebSocket(`ws://localhost:${PORT}/ws`);
+    await new Promise<void>((resolve) => { ws.onopen = () => resolve(); });
+
+    // Create task first
+    const task = await postTask("WS delete test");
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Now set up listener for the delete
+    const msgPromise = new Promise<string>((resolve) => {
+      ws.onmessage = (e) => resolve(typeof e.data === "string" ? e.data : "");
+    });
+
+    const res = await fetch(`${BASE}/tasks/${task.id}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+
+    const msg = await msgPromise;
+    const event = JSON.parse(msg);
+    expect(event.type).toBe("task.deleted");
+    expect(event.taskId).toBe(task.id);
+
+    ws.close();
+  });
+
+  test("WS receives project.created and project.deleted events", async () => {
+    const ws = new WebSocket(`ws://localhost:${PORT}/ws`);
+    await new Promise<void>((resolve) => { ws.onopen = () => resolve(); });
+
+    const messages: any[] = [];
+    ws.onmessage = (e) => {
+      messages.push(JSON.parse(typeof e.data === "string" ? e.data : ""));
+    };
+
+    const project = await postProject("WS project test");
+    // Wait a bit for the message to arrive
+    await new Promise((r) => setTimeout(r, 100));
+    expect(messages.some((m) => m.type === "project.created" && m.projectId === project.id)).toBe(true);
+
+    await fetch(`${BASE}/projects/${project.id}`, { method: "DELETE" });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(messages.some((m) => m.type === "project.deleted" && m.projectId === project.id)).toBe(true);
+
+    ws.close();
+  });
+
+  test("disconnecting a WS client does not break broadcast", async () => {
+    const ws1 = new WebSocket(`ws://localhost:${PORT}/ws`);
+    await new Promise<void>((resolve) => { ws1.onopen = () => resolve(); });
+
+    const ws2 = new WebSocket(`ws://localhost:${PORT}/ws`);
+    await new Promise<void>((resolve) => { ws2.onopen = () => resolve(); });
+
+    // Disconnect ws1
+    ws1.close();
+
+    const msgPromise = new Promise<string>((resolve) => {
+      ws2.onmessage = (e) => resolve(typeof e.data === "string" ? e.data : "");
+    });
+
+    await postTask("After disconnect");
+
+    const msg = await msgPromise;
+    const event = JSON.parse(msg);
+    expect(event.type).toBe("task.created");
+
+    ws2.close();
+  });
+});
+
+// ─── Global Search (S3-02) ────────────────────────────────────────────────────
+
+describe("global search", () => {
+  test("GET /tasks?search=keyword matches title", async () => {
+    await postTask("implement streaming parser");
+    await postTask("fix database connection");
+    const res = await fetch(`${BASE}/tasks?search=streaming`);
+    expect(res.status).toBe(200);
+    const tasks = await res.json() as any[];
+    expect(tasks.length).toBeGreaterThanOrEqual(1);
+    expect(tasks.every((t: any) => t.title.toLowerCase().includes("streaming") || t.description.toLowerCase().includes("streaming"))).toBe(true);
+  });
+
+  test("GET /tasks?search=KEYWORD is case-insensitive", async () => {
+    await postTask("implement streaming parser");
+    const lower = await fetch(`${BASE}/tasks?search=streaming`);
+    const upper = await fetch(`${BASE}/tasks?search=STREAMING`);
+    const lowerTasks = await lower.json() as any[];
+    const upperTasks = await upper.json() as any[];
+    expect(lowerTasks.length).toBe(upperTasks.length);
+  });
+
+  test("GET /tasks?search= with no query returns all tasks (no regression)", async () => {
+    const res = await fetch(`${BASE}/tasks?search=`);
+    expect(res.status).toBe(200);
+    const tasks = await res.json() as any[];
+    expect(tasks.length).toBeGreaterThanOrEqual(0);
+  });
+
+  test("GET /tasks?search=nonexistent returns empty array", async () => {
+    const res = await fetch(`${BASE}/tasks?search=xyznonexistent123`);
+    expect(res.status).toBe(200);
+    const tasks = await res.json() as any[];
+    expect(tasks).toHaveLength(0);
+  });
+});
+
+// ─── Comments CRUD (S3-01) ─────────────────────────────────────────────────────
+
+describe("comments CRUD", () => {
+  test("POST /tasks/:id/comments → 201", async () => {
+    const task = await postTask("Comment test");
+    const res = await fetch(`${BASE}/tasks/${task.id}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "This is a comment" }),
+    });
+    expect(res.status).toBe(201);
+    const comment = await res.json() as any;
+    expect(comment.body).toBe("This is a comment");
+    expect(comment.taskId).toBe(task.id);
+    expect(comment.actor).toBe("system");
+    expect(comment.id).toBeDefined();
+  });
+
+  test("GET /tasks/:id/comments → list with correct order", async () => {
+    const task = await postTask("Comment list test");
+    await fetch(`${BASE}/tasks/${task.id}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "First" }),
+    });
+    await fetch(`${BASE}/tasks/${task.id}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "Second" }),
+    });
+    const res = await fetch(`${BASE}/tasks/${task.id}/comments`);
+    expect(res.status).toBe(200);
+    const comments = await res.json() as any[];
+    expect(comments).toHaveLength(2);
+    expect(comments[0].body).toBe("First");
+    expect(comments[1].body).toBe("Second");
+  });
+
+  test("POST /tasks/:id/comments with empty body → 400", async () => {
+    const task = await postTask("Empty comment test");
+    const res = await fetch(`${BASE}/tasks/${task.id}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "   " }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test("DELETE /comments/:id → success", async () => {
+    const task = await postTask("Delete comment test");
+    const createRes = await fetch(`${BASE}/tasks/${task.id}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "To be deleted" }),
+    });
+    const comment = await createRes.json() as any;
+
+    const delRes = await fetch(`${BASE}/comments/${comment.id}`, { method: "DELETE" });
+    expect(delRes.status).toBe(200);
+
+    const listRes = await fetch(`${BASE}/tasks/${task.id}/comments`);
+    const comments = await listRes.json() as any[];
+    expect(comments).toHaveLength(0);
+  });
+
+  test("DELETE /comments/:id → 404 for nonexistent", async () => {
+    const res = await fetch(`${BASE}/comments/nonexistent`, { method: "DELETE" });
+    expect(res.status).toBe(404);
+  });
+
+  test("comments included in task context", async () => {
+    const task = await postTask("Context comment test");
+    await fetch(`${BASE}/tasks/${task.id}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "Context comment" }),
+    });
+    const res = await fetch(`${BASE}/tasks/${task.id}/context`);
+    expect(res.status).toBe(200);
+    const ctx = await res.json() as any;
+    expect(ctx.comments).toHaveLength(1);
+    expect(ctx.comments[0].body).toBe("Context comment");
+  });
+
+  test("deleting a task cascades its comments", async () => {
+    const task = await postTask("Cascade test");
+    await fetch(`${BASE}/tasks/${task.id}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "Cascade comment" }),
+    });
+    await fetch(`${BASE}/tasks/${task.id}`, { method: "DELETE" });
+    // Comments should be gone (CASCADE)
+    const res = await fetch(`${BASE}/tasks/${task.id}/comments`);
+    // Task is deleted, so 404
+    expect(res.status).toBe(404);
+  });
+
+  test("POST /tasks/:id/comments with body > 2000 chars → 400", async () => {
+    const task = await postTask("Long comment test");
+    const res = await fetch(`${BASE}/tasks/${task.id}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: "a".repeat(2001) }),
+    });
+    expect(res.status).toBe(400);
   });
 });

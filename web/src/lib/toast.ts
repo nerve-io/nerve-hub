@@ -16,3 +16,13 @@ export function toast(message: string, type: ToastType = "error") {
       break;
   }
 }
+
+export function toastWithUndo(message: string, onUndo: () => void) {
+  sonnerToast(message, {
+    duration: 30000,
+    action: {
+      label: "撤销",
+      onClick: onUndo,
+    },
+  });
+}

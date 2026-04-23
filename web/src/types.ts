@@ -51,6 +51,16 @@ export interface TaskContext {
   project: Project | null;
   blockedBy: Task[];
   events: Event[];
+  comments: Comment[];
+}
+
+export interface Comment {
+  id: string;
+  taskId: string;
+  projectId: string;
+  actor: string;
+  body: string;
+  createdAt: string;
 }
 
 export interface CreateProjectInput {

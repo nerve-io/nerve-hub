@@ -47,6 +47,7 @@ const FIELD_LENGTHS: Record<string, number> = {
   "task.description": 5000,
   "task.result": 5000,
   "task.assignee": 100,
+  "comment.body": 2000,
 };
 
 function validateLength(value: string, field: string): string | null {
@@ -62,13 +63,30 @@ function getActor(req: Request): string {
 }
 
 export function createServer(db: TaskDB, port = 3141) {
+  // ─── WebSocket clients ──────────────────────────────────────────────
+  const clients = new Set<import("bun").ServerWebSocket<unknown>>();
+
+  function broadcast(event: { type: string; projectId?: string; taskId?: string }) {
+    const msg = JSON.stringify(event);
+    for (const ws of clients) {
+      try { ws.send(msg); } catch { clients.delete(ws); }
+    }
+  }
+
   const server = Bun.serve({
     port,
     hostname: "0.0.0.0",
-    async fetch(req) {
+    async fetch(req, server) {
       try {
         const url = new URL(req.url);
         const rawPath = url.pathname;
+
+        // ─── WebSocket upgrade ─────────────────────────────────────────
+        if (rawPath === "/ws") {
+          const ok = server.upgrade(req);
+          if (ok) return undefined;
+          return new Response("WebSocket upgrade failed", { status: 400 });
+        }
 
         // ─── Strip /api prefix (frontend uses /api/* for all requests) ───
         const path = rawPath.startsWith("/api/")
@@ -124,6 +142,7 @@ export function createServer(db: TaskDB, port = 3141) {
             if (descErr) return badRequest(descErr);
           }
           const project = db.createProject(body as CreateProjectInput);
+          broadcast({ type: "project.created", projectId: project.id });
           return Response.json(project, { status: 201 });
         }
 
@@ -144,6 +163,7 @@ export function createServer(db: TaskDB, port = 3141) {
         if (projectMatch && req.method === "DELETE") {
           const ok = db.deleteProject(projectMatch[1]);
           if (!ok) return Response.json({ error: "not found" }, { status: 404 });
+          broadcast({ type: "project.deleted", projectId: projectMatch[1] });
           return Response.json({ deleted: true });
         }
 
@@ -191,6 +211,7 @@ export function createServer(db: TaskDB, port = 3141) {
           }
           const actor = getActor(req);
           const task = db.create(body as CreateTaskInput, actor);
+          broadcast({ type: "task.created", projectId: task.projectId, taskId: task.id });
           return Response.json(task, { status: 201 });
         }
 
@@ -201,6 +222,7 @@ export function createServer(db: TaskDB, port = 3141) {
           const priority = url.searchParams.get("priority") || undefined;
           const type = url.searchParams.get("type") || undefined;
           const assignee = url.searchParams.get("assignee") || undefined;
+          const search = url.searchParams.get("search") || undefined;
 
           if (status && !VALID_STATUSES.has(status)) {
             return badRequest(`invalid status: "${status}". must be one of: pending, running, done, failed, blocked`);
@@ -212,7 +234,7 @@ export function createServer(db: TaskDB, port = 3141) {
             return badRequest(`invalid type: "${type}". must be one of: code, review, test, deploy, research, custom`);
           }
 
-          return Response.json(db.list({ projectId, status, priority, type, assignee }));
+          return Response.json(db.list({ projectId, status, priority, type, assignee, search }));
         }
 
         // ─── GET /tasks/:id ─────────────────────────────────────────────
@@ -278,14 +300,51 @@ export function createServer(db: TaskDB, port = 3141) {
           const actor = getActor(req);
           const task = db.update(taskMatch[1], body as UpdateTaskInput, actor);
           if (!task) return Response.json({ error: "not found" }, { status: 404 });
+          broadcast({ type: "task.updated", projectId: task.projectId, taskId: task.id });
           return Response.json(task);
         }
 
         // ─── DELETE /tasks/:id ──────────────────────────────────────────
         if (taskMatch && req.method === "DELETE") {
           const actor = getActor(req);
-          const ok = db.delete(taskMatch[1], actor);
-          if (!ok) return Response.json({ error: "not found" }, { status: 404 });
+          const existing = db.get(taskMatch[1]);
+          if (!existing) return Response.json({ error: "not found" }, { status: 404 });
+          db.delete(taskMatch[1], actor);
+          broadcast({ type: "task.deleted", projectId: existing.projectId, taskId: taskMatch[1] });
+          return Response.json({ deleted: true });
+        }
+
+        // ─── GET /tasks/:id/comments ──────────────────────────────────────
+        const taskCommentsMatch = path.match(/^\/tasks\/([^/]+)\/comments$/);
+        if (taskCommentsMatch && req.method === "GET") {
+          const task = db.get(taskCommentsMatch[1]);
+          if (!task) return Response.json({ error: "not found" }, { status: 404 });
+          return Response.json(db.listComments(taskCommentsMatch[1]));
+        }
+
+        // ─── POST /tasks/:id/comments ─────────────────────────────────────
+        if (taskCommentsMatch && req.method === "POST") {
+          const task = db.get(taskCommentsMatch[1]);
+          if (!task) return Response.json({ error: "not found" }, { status: 404 });
+          const body = await json(req);
+          if (body === null) return badRequest("invalid JSON");
+          if (!body.body || typeof body.body !== "string") return badRequest("body is required (string)");
+          if (!body.body.trim()) return badRequest("body must not be empty");
+          const bodyErr = validateLength(body.body, "comment.body");
+          if (bodyErr) return badRequest(bodyErr);
+          const actor = getActor(req);
+          const comment = db.createComment({ taskId: taskCommentsMatch[1], body: body.body.trim() }, actor);
+          broadcast({ type: "task.commented", projectId: task.projectId, taskId: taskCommentsMatch[1] });
+          return Response.json(comment, { status: 201 });
+        }
+
+        // ─── DELETE /comments/:id ────────────────────────────────────────
+        const commentMatch = path.match(/^\/comments\/([^/]+)$/);
+        if (commentMatch && req.method === "DELETE") {
+          const comment = db.getComment(commentMatch[1]);
+          if (!comment) return Response.json({ error: "not found" }, { status: 404 });
+          db.deleteComment(commentMatch[1]);
+          broadcast({ type: "task.comment_deleted", projectId: comment.projectId, taskId: comment.taskId });
           return Response.json({ deleted: true });
         }
 
@@ -295,6 +354,11 @@ export function createServer(db: TaskDB, port = 3141) {
         console.error(`[api] unhandled: ${err}`);
         return Response.json({ error: "internal server error" }, { status: 500 });
       }
+    },
+    websocket: {
+      open(ws) { clients.add(ws); },
+      close(ws) { clients.delete(ws); },
+      message() { /* no client messages expected */ },
     },
   });
 

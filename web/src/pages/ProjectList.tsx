@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { relativeTime, statusColor } from '../utils';
+import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import type { Project } from '../types';
 
 export function ProjectList() {
@@ -45,6 +46,8 @@ export function ProjectList() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useRealtimeSync(null, load);
 
   const handleCreate = async () => {
     if (!name.trim()) return;

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { getProjectContext, getProjectBlockedStatuses, createTask, updateTask } from '../api';
 import { AppDialog } from '@/components/ui/AppDialog';
-import { toast } from '@/lib/toast';
+import { toast, toastWithUndo } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { statusColor, priorityColor } from '../utils';
+import { useRealtimeSync } from '@/hooks/useRealtimeSync';
+import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut';
 import type { Task, TaskStatus, TaskPriority, TaskType } from '../types';
 
 const STATUSES: TaskStatus[] = ['pending', 'running', 'blocked', 'done', 'failed'];
@@ -36,6 +38,11 @@ export function Kanban({ projectId }: Props) {
   const [formAssignee, setFormAssignee] = useState('');
   const [formDeps, setFormDeps] = useState('');
 
+  // Filter state
+  const [filterAssignee, setFilterAssignee] = useState('');
+  const [filterType, setFilterType] = useState<TaskType | 'all'>('all');
+  const [filterPriority, setFilterPriority] = useState<TaskPriority | 'all'>('all');
+
   const load = useCallback(async () => {
     try {
       const [ctx, blockedStatuses] = await Promise.all([
@@ -52,9 +59,16 @@ export function Kanban({ projectId }: Props) {
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 10000);
+    const interval = setInterval(load, 30000);
     return () => clearInterval(interval);
   }, [load]);
+
+  useRealtimeSync(projectId, load);
+
+  useKeyboardShortcut('n', () => {
+    resetForm();
+    setModalOpen(true);
+  });
 
   const handleCreateTask = async () => {
     if (!formTitle.trim()) return;
@@ -104,17 +118,41 @@ export function Kanban({ projectId }: Props) {
     const taskId = dragTaskIdRef.current;
     if (!taskId) return;
     dragTaskIdRef.current = null;
+
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const previousStatus = task.status;
+
+    if (previousStatus === status) return;
+
     try {
       await updateTask(taskId, { status: status as TaskStatus });
       load();
+      toastWithUndo(`已移至 ${status}`, async () => {
+        try {
+          await updateTask(taskId, { status: previousStatus });
+          load();
+        } catch (err: any) {
+          toast(err.message);
+        }
+      });
     } catch (err: any) {
       toast(err.message);
     }
   };
 
+  const filteredTasks = tasks.filter((t) => {
+    if (filterAssignee && !t.assignee.toLowerCase().includes(filterAssignee.toLowerCase())) return false;
+    if (filterType !== 'all' && t.type !== filterType) return false;
+    if (filterPriority !== 'all' && t.priority !== filterPriority) return false;
+    return true;
+  });
+
+  const hasFilter = filterAssignee !== '' || filterType !== 'all' || filterPriority !== 'all';
+
   const columns = STATUSES.map((status) => ({
     status,
-    tasks: tasks.filter((t) => t.status === status),
+    tasks: filteredTasks.filter((t) => t.status === status),
   }));
 
   return (
@@ -126,7 +164,56 @@ export function Kanban({ projectId }: Props) {
           {project?.description && (
             <span className="text-sm text-muted-foreground">{project.description}</span>
           )}
+          {hasFilter && (
+            <span className="text-xs text-muted-foreground ml-auto">
+              {filteredTasks.length} / {tasks.length} tasks
+            </span>
+          )}
         </div>
+      </div>
+
+      {/* Filter bar */}
+      <div className="flex items-center gap-3 mb-4 shrink-0 flex-wrap">
+        <div className="relative">
+          <Input
+            value={filterAssignee}
+            onChange={(e) => setFilterAssignee(e.target.value)}
+            placeholder="Filter by assignee"
+            className="h-8 w-[180px] text-[13px]"
+          />
+        </div>
+        <Select value={filterType} onValueChange={(v) => setFilterType(v as TaskType | 'all')}>
+          <SelectTrigger className="h-8 w-[130px] text-[13px]">
+            <SelectValue placeholder="All types" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All types</SelectItem>
+            {TYPES.map((t) => (
+              <SelectItem key={t} value={t}>{t}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={filterPriority} onValueChange={(v) => setFilterPriority(v as TaskPriority | 'all')}>
+          <SelectTrigger className="h-8 w-[140px] text-[13px]">
+            <SelectValue placeholder="All priorities" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All priorities</SelectItem>
+            {PRIORITIES.map((p) => (
+              <SelectItem key={p} value={p}>{p}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {hasFilter && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => { setFilterAssignee(''); setFilterType('all'); setFilterPriority('all'); }}
+          >
+            ✕ 清除
+          </Button>
+        )}
       </div>
 
       <div className="flex gap-3 flex-1 overflow-x-auto overflow-y-hidden pb-2">

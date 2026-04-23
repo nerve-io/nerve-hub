@@ -56,6 +56,8 @@ export const listTasks = (params?: Record<string, string>) => {
   return request<Task[]>(`/tasks${qs}`);
 };
 export const getTask = (id: string) => request<Task>(`/tasks/${id}`);
+export const searchTasks = (query: string) =>
+  request<Task[]>(`/tasks?search=${encodeURIComponent(query)}`);
 export const createTask = (input: CreateTaskInput) =>
   request<Task>('/tasks', { method: 'POST', body: JSON.stringify(input) });
 export const updateTask = (id: string, input: UpdateTaskInput) =>
@@ -66,6 +68,15 @@ export const getTaskContext = (id: string) =>
   request<TaskContext>(`/tasks/${id}/context`);
 export const getBlockedBy = (id: string) =>
   request<Task[]>(`/tasks/${id}/blocked-by`);
+
+// ─── Comments ────────────────────────────────────────────────────────────────
+
+import type { Comment } from './types';
+
+export const getComments = (taskId: string) => request<Comment[]>(`/tasks/${taskId}/comments`);
+export const createComment = (taskId: string, body: string) =>
+  request<Comment>(`/tasks/${taskId}/comments`, { method: 'POST', body: JSON.stringify({ body }) });
+export const deleteComment = (id: string) => request(`/comments/${id}`, { method: 'DELETE' });
 
 // ─── Events ──────────────────────────────────────────────────────────────────
 

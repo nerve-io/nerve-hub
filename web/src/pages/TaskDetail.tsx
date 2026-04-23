@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { getTaskContext, updateTask, deleteTask } from '../api';
-import { toast } from '@/lib/toast';
+import { toast, toastWithUndo } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { InlineEdit } from '@/components/InlineEdit';
 import { MetaRow } from '@/components/MetaRow';
+import { CommentSection } from '@/components/CommentSection';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { relativeTime, absoluteTime, statusColor, priorityColor, formatAction } from '../utils';
+import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import type { TaskContext as TaskContextType, TaskStatus } from '../types';
 
 interface Props {
@@ -36,10 +38,23 @@ export function TaskDetail({ taskId }: Props) {
     load();
   }, [load]);
 
+  useRealtimeSync(ctx?.task?.projectId ?? null, load);
+
   const handleStatusChange = async (status: TaskStatus) => {
+    const previousStatus = ctx?.task?.status;
+    if (!previousStatus || previousStatus === status) return;
+
     try {
       await updateTask(taskId, { status });
       load();
+      toastWithUndo(`已变更为 ${status}`, async () => {
+        try {
+          await updateTask(taskId, { status: previousStatus });
+          load();
+        } catch (err: any) {
+          toast(err.message);
+        }
+      });
     } catch (err: any) {
       toast(err.message);
     }
@@ -227,6 +242,15 @@ export function TaskDetail({ taskId }: Props) {
                   ))
                 )}
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Comments</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CommentSection taskId={taskId} comments={ctx.comments} onUpdated={load} />
             </CardContent>
           </Card>
         </div>

@@ -77,6 +77,7 @@ export interface ListFilter {
   priority?: string;
   type?: string;
   assignee?: string;
+  search?: string;
 }
 
 // ─── Event ───────────────────────────────────────────────────────────────────
@@ -113,6 +114,16 @@ export interface TaskContext {
   project: Project | null;
   blockedBy: Task[];
   events: Event[];
+  comments: Comment[];
+}
+
+export interface Comment {
+  id: string;
+  taskId: string;
+  projectId: string;
+  actor: string;
+  body: string;
+  createdAt: string;
 }
 
 // ─── Migrations ──────────────────────────────────────────────────────────────
@@ -193,6 +204,23 @@ const MIGRATIONS: Migration[] = [
           payload    TEXT NOT NULL DEFAULT '{}',
           created_at TEXT NOT NULL
         );
+      `);
+    },
+  },
+  {
+    version: 7,
+    name: "add_comments_table",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS comments (
+          id         TEXT PRIMARY KEY,
+          task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          project_id TEXT NOT NULL,
+          actor      TEXT NOT NULL DEFAULT 'system',
+          body       TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_comments_task_id ON comments(task_id);
       `);
     },
   },
@@ -398,6 +426,10 @@ export class TaskDB {
       conditions.push("assignee = ?");
       params.push(filter.assignee);
     }
+    if (filter?.search) {
+      conditions.push("(LOWER(title) LIKE '%' || LOWER(?) || '%' OR LOWER(description) LIKE '%' || LOWER(?) || '%')");
+      params.push(filter.search, filter.search);
+    }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const rows = this.db.prepare(`SELECT * FROM tasks ${where} ORDER BY created_at DESC`).all(...params) as any[];
@@ -511,6 +543,60 @@ export class TaskDB {
     return null;
   }
 
+  // ─── Comments ────────────────────────────────────────────────────────────────
+
+  createComment(input: { taskId: string; body: string }, actor = "system"): Comment {
+    const task = this.get(input.taskId);
+    if (!task) throw new Error("task not found");
+
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db.prepare(
+      `INSERT INTO comments (id, task_id, project_id, actor, body, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(id, input.taskId, task.projectId, actor, input.body, now);
+
+    this.logEvent({
+      projectId: task.projectId,
+      taskId: input.taskId,
+      actor,
+      action: "task.commented",
+      payload: { body: input.body.slice(0, 100) },
+    });
+
+    return { id, taskId: input.taskId, projectId: task.projectId, actor, body: input.body, createdAt: now };
+  }
+
+  listComments(taskId: string): Comment[] {
+    return this.db.prepare(
+      `SELECT * FROM comments WHERE task_id = ? ORDER BY created_at ASC`
+    ).all(taskId).map((r: any) => ({
+      id: r.id,
+      taskId: r.task_id,
+      projectId: r.project_id,
+      actor: r.actor,
+      body: r.body,
+      createdAt: r.created_at,
+    }));
+  }
+
+  getComment(commentId: string): Comment | undefined {
+    const r = this.db.prepare(`SELECT * FROM comments WHERE id = ?`).get(commentId) as any;
+    if (!r) return undefined;
+    return { id: r.id, taskId: r.task_id, projectId: r.project_id, actor: r.actor, body: r.body, createdAt: r.created_at };
+  }
+
+  deleteComment(commentId: string): boolean {
+    const comment = this.db.prepare(`SELECT * FROM comments WHERE id = ?`).get(commentId) as any;
+    if (!comment) return false;
+    this.db.prepare(`DELETE FROM comments WHERE id = ?`).run(commentId);
+    this.logEvent({
+      projectId: comment.project_id,
+      taskId: comment.task_id,
+      action: "task.comment_deleted",
+    });
+    return true;
+  }
+
   // ─── Contexts ───────────────────────────────────────────────────────────
 
   getProjectContext(projectId: string): ProjectContext | undefined {
@@ -533,8 +619,9 @@ export class TaskDB {
     const project = task.projectId ? (this.getProject(task.projectId) ?? null) : null;
     const blockedBy = this.getBlockedBy(taskId);
     const events = this.getEvents({ taskId, limit: 20 });
+    const comments = this.listComments(taskId);
 
-    return { task, project, blockedBy, events };
+    return { task, project, blockedBy, events, comments };
   }
 
   close(): void {
