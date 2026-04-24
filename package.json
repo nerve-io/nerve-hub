@@ -1,6 +1,6 @@
 {
   "name": "@nerve-io/hub",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "AI Agent task bus — the nervous system for multi-agent collaboration",
   "type": "module",
   "scripts": {
