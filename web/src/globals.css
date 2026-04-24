@@ -1,0 +1,152 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    /* shadcn 标准变量 - 暗色主题 (HSL values without hsl() wrapper) */
+    --background: 225 20% 5%;
+    --foreground: 0 0% 91%;
+    --card: 225 15% 10%;
+    --card-foreground: 0 0% 91%;
+    --popover: 225 15% 10%;
+    --popover-foreground: 0 0% 91%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 225 15% 16%;
+    --secondary-foreground: 0 0% 91%;
+    --muted: 225 15% 16%;
+    --muted-foreground: 0 0% 53%;
+    --accent: 225 15% 16%;
+    --accent-foreground: 0 0% 91%;
+    --destructive: 0 87% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 225 15% 18%;
+    --input: 225 15% 18%;
+    --ring: 217 91% 60%;
+    --radius: 0.75rem;
+
+    /* 自定义语义色 */
+    --success: 153 59% 53%;
+    --success-foreground: 0 0% 6%;
+    --warning: 37 91% 55%;
+    --warning-foreground: 0 0% 6%;
+
+    /* 状态色 (保留用于 inline style) */
+    --status-pending: 0 0% 53%;
+    --status-running: 43 64% 51%;
+    --status-blocked: 37 91% 55%;
+    --status-done: 153 59% 53%;
+    --status-failed: 0 87% 60%;
+
+    /* 优先级色 */
+    --priority-critical: 0 87% 60%;
+    --priority-high: 37 91% 55%;
+    --priority-medium: 0 0% 53%;
+    --priority-low: 0 0% 40%;
+
+    /* 侧边栏宽度 */
+    --sidebar-width: 220px;
+
+    /* Glassmorphism 光效 */
+    --glow-primary: 217 91% 60%;
+    --glow-secondary: 270 50% 45%;
+  }
+}
+
+/* Register all shadcn semantic colors as Tailwind v4 tokens */
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-success: hsl(var(--success));
+  --color-success-foreground: hsl(var(--success-foreground));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  a:focus-visible, button:focus-visible, [role="button"]:focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse 600px 400px at 10% 10%, hsl(var(--glow-primary) / 0.15), transparent),
+      radial-gradient(ellipse 500px 500px at 90% 80%, hsl(var(--glow-secondary) / 0.12), transparent);
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
+
+/* Links */
+a {
+  color: hsl(var(--primary));
+  text-decoration: none;
+}
+
+a:hover{text-decoration:underline}
+a:focus-visible{text-decoration:underline}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
