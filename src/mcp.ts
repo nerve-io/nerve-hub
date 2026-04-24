@@ -37,45 +37,10 @@ export async function startMcp(db: TaskDB) {
     { capabilities: { tools: {} } }
   );
 
-  // ─── Project Tools ─────────────────────────────────────────────────────
+  let _toolCount = 0;
+  let _totalDescChars = 0;
 
-  server.tool(
-    "create_project",
-    "Create a new project to group tasks",
-    {
-      name: z.string().describe("Project name"),
-      description: z.string().optional().describe("Project description"),
-    },
-    async (args) => {
-      const project = db.createProject({ name: args.name, description: args.description });
-      return { content: [{ type: "text" as const, text: JSON.stringify(project, null, 2) }] };
-    }
-  );
-
-  server.tool(
-    "list_projects",
-    "List all projects",
-    {},
-    async () => {
-      const projects = db.listProjects();
-      return { content: [{ type: "text" as const, text: JSON.stringify(projects, null, 2) }] };
-    }
-  );
-
-  server.tool(
-    "get_project_context",
-    "Get project context: project info, all tasks, and status statistics. Use this to inject project state into a new conversation.",
-    {
-      projectId: z.string().describe("Project ID"),
-    },
-    async (args) => {
-      const ctx = db.getProjectContext(args.projectId);
-      if (!ctx) return { content: [{ type: "text" as const, text: "Error: project not found" }], isError: true };
-      return { content: [{ type: "text" as const, text: JSON.stringify(ctx, null, 2) }] };
-    }
-  );
-
-  // ─── Task Tools ────────────────────────────────────────────────────────
+  // ─── Core Task Tools ───────────────────────────────────────────────────
 
   server.tool(
     "create_task",
@@ -94,48 +59,55 @@ export async function startMcp(db: TaskDB) {
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     }
   );
+  _toolCount++;
+  _totalDescChars += "Create a new task".length;
 
   server.tool(
-    "list_tasks",
-    "List tasks, optionally filtered by projectId, status, priority, type, and/or assignee",
-    {
-      projectId: z.string().optional().describe("Filter by project ID"),
-      status: STATUS_ENUM.optional().describe("Filter by status: pending, running, done, failed, blocked"),
-      priority: PRIORITY_ENUM.optional().describe("Filter by priority: critical, high, medium, low"),
-      type: TYPE_ENUM.optional().describe("Filter by type: code, review, test, deploy, research, custom"),
-      assignee: z.string().optional().describe("Filter by assignee name"),
-    },
-    async (args) => {
-      const tasks = db.list({ projectId: args.projectId, status: args.status, priority: args.priority, type: args.type, assignee: args.assignee });
-      return { content: [{ type: "text" as const, text: JSON.stringify(tasks, null, 2) }] };
-    }
-  );
-
-  server.tool(
-    "get_task",
-    "Get a task by ID",
+    "complete_task",
+    "Complete a task: atomically set status to 'done' and write the result. Use this when work is finished.",
     {
       id: z.string().describe("Task ID"),
+      result: z.string().describe("What was accomplished — summary, PR URL, output, etc."),
     },
     async (args) => {
-      const task = db.get(args.id);
+      const task = db.update(args.id, { status: "done", result: args.result });
       if (!task) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     }
   );
+  _toolCount++;
+  _totalDescChars += "Complete a task: atomically set status to 'done' and write the result. Use this when work is finished.".length;
 
   server.tool(
-    "get_task_context",
-    "Get full task context: the task itself, its project (if any), unfinished dependencies, and recent event history. Call this before starting work on a task to inject full context into the current conversation.",
+    "get_agent_briefing",
+    "Get a structured briefing for a task, including full context (description, blockers, events, comments) and action guide. Use this as working context for an AI Agent.",
     {
-      id: z.string().describe("Task ID"),
+      task_id: z.string().describe("Task ID"),
     },
     async (args) => {
-      const ctx = db.getTaskContext(args.id);
-      if (!ctx) return { content: [{ type: "text" as const, text: "Error: task not found" }], isError: true };
-      return { content: [{ type: "text" as const, text: JSON.stringify(ctx, null, 2) }] };
+      const briefing = db.generateBriefing(args.task_id);
+      if (!briefing) return { content: [{ type: "text" as const, text: "Error: task not found" }], isError: true };
+      return { content: [{ type: "text" as const, text: briefing }] };
     }
   );
+  _toolCount++;
+  _totalDescChars += "Get a structured briefing for a task, including full context (description, blockers, events, comments) and action guide. Use this as working context for an AI Agent.".length;
+
+  server.tool(
+    "claim_task",
+    "Claim a task: atomically set status to 'running' and assign it to an agent. Use this to pick up a task before starting work.",
+    {
+      id: z.string().describe("Task ID"),
+      assignee: z.string().describe("Your name or agent identifier (e.g. claude, cursor, gpt)"),
+    },
+    async (args) => {
+      const task = db.update(args.id, { status: "running", assignee: args.assignee });
+      if (!task) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
+      return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
+    }
+  );
+  _toolCount++;
+  _totalDescChars += "Claim a task: atomically set status to 'running' and assign it to an agent. Use this to pick up a task before starting work.".length;
 
   server.tool(
     "update_task",
@@ -158,6 +130,58 @@ export async function startMcp(db: TaskDB) {
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     }
   );
+  _toolCount++;
+  _totalDescChars += "Update task fields (title, description, status, priority, type, assignee, dependencies, result)".length;
+
+  server.tool(
+    "get_task_context",
+    "Get full task context: the task itself, its project (if any), unfinished dependencies, and recent event history. Call this before starting work on a task to inject full context into the current conversation.",
+    {
+      id: z.string().describe("Task ID"),
+    },
+    async (args) => {
+      const ctx = db.getTaskContext(args.id);
+      if (!ctx) return { content: [{ type: "text" as const, text: "Error: task not found" }], isError: true };
+      return { content: [{ type: "text" as const, text: JSON.stringify(ctx, null, 2) }] };
+    }
+  );
+  _toolCount++;
+  _totalDescChars += "Get full task context: the task itself, its project (if any), unfinished dependencies, and recent event history. Call this before starting work on a task to inject full context into the current conversation.".length;
+
+  server.tool(
+    "list_tasks",
+    "List tasks, optionally filtered by projectId, status, priority, type, and/or assignee",
+    {
+      projectId: z.string().optional().describe("Filter by project ID"),
+      status: STATUS_ENUM.optional().describe("Filter by status: pending, running, done, failed, blocked"),
+      priority: PRIORITY_ENUM.optional().describe("Filter by priority: critical, high, medium, low"),
+      type: TYPE_ENUM.optional().describe("Filter by type: code, review, test, deploy, research, custom"),
+      assignee: z.string().optional().describe("Filter by assignee name"),
+      limit: z.number().optional().describe("Max tasks to return (default 10, max 100)"),
+      offset: z.number().optional().describe("Number of tasks to skip (for pagination)"),
+    },
+    async (args) => {
+      const tasks = db.list({ projectId: args.projectId, status: args.status, priority: args.priority, type: args.type, assignee: args.assignee, limit: args.limit, offset: args.offset });
+      return { content: [{ type: "text" as const, text: JSON.stringify(tasks, null, 2) }] };
+    }
+  );
+  _toolCount++;
+  _totalDescChars += "List tasks, optionally filtered by projectId, status, priority, type, and/or assignee".length;
+
+  server.tool(
+    "get_task",
+    "Get a task by ID",
+    {
+      id: z.string().describe("Task ID"),
+    },
+    async (args) => {
+      const task = db.get(args.id);
+      if (!task) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
+      return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
+    }
+  );
+  _toolCount++;
+  _totalDescChars += "Get a task by ID".length;
 
   server.tool(
     "get_blocked_by",
@@ -172,6 +196,8 @@ export async function startMcp(db: TaskDB) {
       return { content: [{ type: "text" as const, text: JSON.stringify(blockedBy, null, 2) }] };
     }
   );
+  _toolCount++;
+  _totalDescChars += "Get unfinished dependencies of a task. Returns a list of tasks that must be completed before this task can start. Use this to check if a task is ready to begin.".length;
 
   server.tool(
     "get_events",
@@ -186,47 +212,84 @@ export async function startMcp(db: TaskDB) {
       return { content: [{ type: "text" as const, text: JSON.stringify(events, null, 2) }] };
     }
   );
+  _toolCount++;
+  _totalDescChars += "Query event log: task creations, status changes, updates, and deletions. Use this to understand what happened in a project or task.".length;
 
   server.tool(
-    "claim_task",
-    "Claim a task: atomically set status to 'running' and assign it to an agent. Use this to pick up a task before starting work.",
+    "search_tasks",
+    "Search tasks across projects by keyword (matches title and description)",
     {
-      id: z.string().describe("Task ID"),
-      assignee: z.string().describe("Your name or agent identifier (e.g. claude, cursor, gpt)"),
+      query: z.string().describe("Search keyword"),
+      project_id: z.string().optional().describe("Limit to a specific project"),
     },
     async (args) => {
-      const task = db.update(args.id, { status: "running", assignee: args.assignee });
-      if (!task) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
-      return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
+      const tasks = db.list({ search: args.query, projectId: args.project_id });
+      return { content: [{ type: "text" as const, text: JSON.stringify(tasks, null, 2) }] };
     }
   );
+  _toolCount++;
+  _totalDescChars += "Search tasks across projects by keyword (matches title and description)".length;
+
+  // ─── Project Tools ─────────────────────────────────────────────────────
 
   server.tool(
-    "complete_task",
-    "Complete a task: atomically set status to 'done' and write the result. Use this when work is finished.",
+    "create_project",
+    "Create a new project to group tasks",
     {
-      id: z.string().describe("Task ID"),
-      result: z.string().describe("What was accomplished — summary, PR URL, output, etc."),
+      name: z.string().describe("Project name"),
+      description: z.string().optional().describe("Project description"),
+      rules: z.string().optional().describe("Project collaboration rules/guidelines"),
     },
     async (args) => {
-      const task = db.update(args.id, { status: "done", result: args.result });
-      if (!task) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
-      return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
+      const project = db.createProject({ name: args.name, description: args.description, rules: args.rules });
+      return { content: [{ type: "text" as const, text: JSON.stringify(project, null, 2) }] };
     }
   );
+  _toolCount++;
+  _totalDescChars += "Create a new project to group tasks".length;
 
   server.tool(
-    "delete_task",
-    "Delete a task",
-    {
-      id: z.string().describe("Task ID"),
-    },
-    async (args) => {
-      const ok = db.delete(args.id);
-      if (!ok) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
-      return { content: [{ type: "text" as const, text: "Deleted" }] };
+    "list_projects",
+    "List all projects",
+    {},
+    async () => {
+      const projects = db.listProjects();
+      return { content: [{ type: "text" as const, text: JSON.stringify(projects, null, 2) }] };
     }
   );
+  _toolCount++;
+  _totalDescChars += "List all projects".length;
+
+  server.tool(
+    "get_project_rules",
+    "Get project rules/collaboration guidelines. Returns '(此项目暂无协作规则)' if no rules set.",
+    {
+      projectId: z.string().describe("Project ID"),
+    },
+    async (args) => {
+      const project = db.getProject(args.projectId);
+      if (!project) return { content: [{ type: "text" as const, text: "Error: project not found" }], isError: true };
+      const rules = project.rules || "(此项目暂无协作规则)";
+      return { content: [{ type: "text" as const, text: rules }] };
+    }
+  );
+  _toolCount++;
+  _totalDescChars += "Get project rules/collaboration guidelines. Returns '(此项目暂无协作规则)' if no rules set.".length;
+
+  server.tool(
+    "get_project_context",
+    "Get project context: project info, all tasks, and status statistics. Use this to inject project state into a new conversation.",
+    {
+      projectId: z.string().describe("Project ID"),
+    },
+    async (args) => {
+      const ctx = db.getProjectContext(args.projectId);
+      if (!ctx) return { content: [{ type: "text" as const, text: "Error: project not found" }], isError: true };
+      return { content: [{ type: "text" as const, text: JSON.stringify(ctx, null, 2) }] };
+    }
+  );
+  _toolCount++;
+  _totalDescChars += "Get project context: project info, all tasks, and status statistics. Use this to inject project state into a new conversation.".length;
 
   // ─── Agent Tools ───────────────────────────────────────────────────────
 
@@ -242,6 +305,7 @@ export async function startMcp(db: TaskDB) {
       endpoint: z.string().optional().describe("Webhook URL (required when type=webhook)"),
       heartbeat_interval: z.number().optional().describe("Heartbeat interval in seconds (default 60, webhook only)"),
       metadata: z.string().optional().describe("JSON string for extension fields (e.g. capabilities)"),
+      capabilities: z.string().optional().describe("JSON string of agent capabilities (taskTypes, languages, priorities, description)"),
     },
     async (args) => {
       const agent = db.registerAgent({
@@ -251,10 +315,13 @@ export async function startMcp(db: TaskDB) {
         endpoint: args.endpoint,
         heartbeatInterval: args.heartbeat_interval,
         metadata: args.metadata,
+        capabilities: args.capabilities,
       });
       return { content: [{ type: "text" as const, text: JSON.stringify(agent, null, 2) }] };
     }
   );
+  _toolCount++;
+  _totalDescChars += "Register or update an Agent profile. If the id already exists, fields are updated (created_at and status are preserved).".length;
 
   server.tool(
     "list_agents",
@@ -265,33 +332,10 @@ export async function startMcp(db: TaskDB) {
       return { content: [{ type: "text" as const, text: JSON.stringify(agents, null, 2) }] };
     }
   );
+  _toolCount++;
+  _totalDescChars += "List all registered Agents and their current status".length;
 
-  // ─── Sprint 3 Backfill Tools ──────────────────────────────────────────
-
-  server.tool(
-    "search_tasks",
-    "Search tasks across projects by keyword (matches title and description)",
-    {
-      query: z.string().describe("Search keyword"),
-      project_id: z.string().optional().describe("Limit to a specific project"),
-    },
-    async (args) => {
-      const tasks = db.list({ search: args.query, projectId: args.project_id });
-      return { content: [{ type: "text" as const, text: JSON.stringify(tasks, null, 2) }] };
-    }
-  );
-
-  server.tool(
-    "list_comments",
-    "Get all comments for a task (chronological order)",
-    {
-      task_id: z.string().describe("Task ID"),
-    },
-    async (args) => {
-      const comments = db.listComments(args.task_id);
-      return { content: [{ type: "text" as const, text: JSON.stringify(comments, null, 2) }] };
-    }
-  );
+  // ─── Comment Tools ─────────────────────────────────────────────────────
 
   server.tool(
     "create_comment",
@@ -309,6 +353,55 @@ export async function startMcp(db: TaskDB) {
       }
     }
   );
+  _toolCount++;
+  _totalDescChars += "Add a comment/note to a task".length;
+
+  server.tool(
+    "list_comments",
+    "Get comments for a task (chronological order)",
+    {
+      task_id: z.string().describe("Task ID"),
+      limit: z.number().optional().describe("Max comments to return (default 50, max 200)"),
+      offset: z.number().optional().describe("Number of comments to skip (for pagination)"),
+    },
+    async (args) => {
+      const comments = db.listComments(args.task_id, { limit: args.limit, offset: args.offset });
+      return { content: [{ type: "text" as const, text: JSON.stringify(comments, null, 2) }] };
+    }
+  );
+  _toolCount++;
+  _totalDescChars += "Get all comments for a task (chronological order)".length;
+
+  // ─── Handoff Tools ────────────────────────────────────────────────────
+
+  server.tool(
+    "get_handoff_queue",
+    "Get all tasks assigned to Manual-type Agents that are pending (Handoff Queue).",
+    {},
+    async () => {
+      const tasks = db.getHandoffQueue();
+      return { content: [{ type: "text" as const, text: JSON.stringify(tasks, null, 2) }] };
+    }
+  );
+  _toolCount++;
+  _totalDescChars += "Get all tasks assigned to Manual-type Agents that are pending (Handoff Queue).".length;
+
+  // ─── Deletion Tools ────────────────────────────────────────────────────
+
+  server.tool(
+    "delete_task",
+    "Delete a task",
+    {
+      id: z.string().describe("Task ID"),
+    },
+    async (args) => {
+      const ok = db.delete(args.id);
+      if (!ok) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
+      return { content: [{ type: "text" as const, text: "Deleted" }] };
+    }
+  );
+  _toolCount++;
+  _totalDescChars += "Delete a task".length;
 
   server.tool(
     "delete_comment",
@@ -322,31 +415,11 @@ export async function startMcp(db: TaskDB) {
       return { content: [{ type: "text" as const, text: "Deleted" }] };
     }
   );
+  _toolCount++;
+  _totalDescChars += "Delete a comment".length;
 
-  // ─── Handoff Tools ────────────────────────────────────────────────────
-
-  server.tool(
-    "get_agent_briefing",
-    "Get a structured briefing for a task, including full context (description, blockers, events, comments) and action guide. Use this as working context for an AI Agent.",
-    {
-      task_id: z.string().describe("Task ID"),
-    },
-    async (args) => {
-      const briefing = db.generateBriefing(args.task_id);
-      if (!briefing) return { content: [{ type: "text" as const, text: "Error: task not found" }], isError: true };
-      return { content: [{ type: "text" as const, text: briefing }] };
-    }
-  );
-
-  server.tool(
-    "get_handoff_queue",
-    "Get all tasks assigned to Manual-type Agents that are pending (Handoff Queue).",
-    {},
-    async () => {
-      const tasks = db.getHandoffQueue();
-      return { content: [{ type: "text" as const, text: JSON.stringify(tasks, null, 2) }] };
-    }
-  );
+  // Audit: log tool count and description character count
+  console.error(`[nerve-hub] Registered ${_toolCount} tools (total desc chars: ${_totalDescChars})`);
 
   // ─── Connect ─────────────────────────────────────────────────────────────
 

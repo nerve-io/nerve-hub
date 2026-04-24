@@ -23,6 +23,7 @@ export interface Project {
   id: string;
   name: string;
   description: string;
+  rules: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -30,6 +31,7 @@ export interface Project {
 export interface CreateProjectInput {
   name: string;
   description?: string;
+  rules?: string;
 }
 
 // ─── Task ────────────────────────────────────────────────────────────────────
@@ -78,6 +80,8 @@ export interface ListFilter {
   type?: string;
   assignee?: string;
   search?: string;
+  limit?: number;
+  offset?: number;
 }
 
 // ─── Event ───────────────────────────────────────────────────────────────────
@@ -140,6 +144,7 @@ export interface Agent {
   lastSeen?: string;
   status: AgentStatus;
   metadata?: string;
+  capabilities?: string;
   createdAt: string;
 }
 
@@ -258,6 +263,20 @@ const MIGRATIONS: Migration[] = [
           created_at        TEXT NOT NULL
         );
       `);
+    },
+  },
+  {
+    version: 9,
+    name: "add_project_rules",
+    up(db) {
+      db.exec(`ALTER TABLE projects ADD COLUMN rules TEXT NOT NULL DEFAULT ''`);
+    },
+  },
+  {
+    version: 10,
+    name: "add_agent_capabilities",
+    up(db) {
+      db.exec(`ALTER TABLE agents ADD COLUMN capabilities TEXT`);
     },
   },
 ];
@@ -386,13 +405,14 @@ export class TaskDB {
       id: randomUUID(),
       name: input.name,
       description: input.description ?? "",
+      rules: input.rules ?? "",
       createdAt: now,
       updatedAt: now,
     };
     this.db.prepare(
-      `INSERT INTO projects (id, name, description, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`
-    ).run(project.id, project.name, project.description, project.createdAt, project.updatedAt);
+      `INSERT INTO projects (id, name, description, rules, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(project.id, project.name, project.description, project.rules, project.createdAt, project.updatedAt);
     return project;
   }
 
@@ -474,7 +494,9 @@ export class TaskDB {
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-    const rows = this.db.prepare(`SELECT * FROM tasks ${where} ORDER BY created_at DESC`).all(...params) as any[];
+    const limit = Math.min(filter?.limit ?? 10, 100);
+    const offset = filter?.offset ?? 0;
+    const rows = this.db.prepare(`SELECT * FROM tasks ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as any[];
     return rows.map(r => this.toTask(r));
   }
 
@@ -608,10 +630,12 @@ export class TaskDB {
     return { id, taskId: input.taskId, projectId: task.projectId, actor, body: input.body, createdAt: now };
   }
 
-  listComments(taskId: string): Comment[] {
+  listComments(taskId: string, options?: { limit?: number; offset?: number }): Comment[] {
+    const limit = Math.min(options?.limit ?? 50, 200);
+    const offset = options?.offset ?? 0;
     return this.db.prepare(
-      `SELECT * FROM comments WHERE task_id = ? ORDER BY created_at ASC`
-    ).all(taskId).map((r: any) => ({
+      `SELECT * FROM comments WHERE task_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?`
+    ).all(taskId, limit, offset).map((r: any) => ({
       id: r.id,
       taskId: r.task_id,
       projectId: r.project_id,
@@ -675,17 +699,19 @@ export class TaskDB {
     endpoint?: string;
     heartbeatInterval?: number;
     metadata?: string;
+    capabilities?: string;
   }): Agent {
     const now = new Date().toISOString();
     this.db.prepare(`
-      INSERT INTO agents (id, name, type, endpoint, heartbeat_interval, last_seen, status, metadata, created_at)
-      VALUES (?, ?, ?, ?, ?, NULL, 'offline', ?, ?)
+      INSERT INTO agents (id, name, type, endpoint, heartbeat_interval, last_seen, status, metadata, capabilities, created_at)
+      VALUES (?, ?, ?, ?, ?, NULL, 'offline', ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         type = excluded.type,
         endpoint = excluded.endpoint,
         heartbeat_interval = excluded.heartbeat_interval,
-        metadata = excluded.metadata
+        metadata = excluded.metadata,
+        capabilities = excluded.capabilities
     `).run(
       input.id,
       input.name,
@@ -693,6 +719,7 @@ export class TaskDB {
       input.endpoint ?? null,
       input.heartbeatInterval ?? null,
       input.metadata ?? null,
+      input.capabilities ?? null,
       now,
     );
     return this.getAgent(input.id)!;
@@ -745,8 +772,10 @@ export class TaskDB {
 
     const project = task.projectId ? this.getProject(task.projectId) : undefined;
     const blockedBy = this.getBlockedBy(taskId);
-    const events = this.getEvents({ taskId, limit: 10 });
-    const comments = this.listComments(taskId);
+    const eventsTotal = this.db.prepare("SELECT COUNT(*) as c FROM events WHERE task_id = ?").get(taskId) as any;
+    const events = this.getEvents({ taskId, limit: 5 });
+    const commentsTotal = this.db.prepare("SELECT COUNT(*) as c FROM comments WHERE task_id = ?").get(taskId) as any;
+    const comments = this.listComments(taskId, { limit: 5, offset: Math.max(0, (commentsTotal?.c ?? 0) - 5) });
 
     const projectName = project ? project.name : "(无项目)";
     const description = task.description || "（无描述）";
@@ -756,15 +785,19 @@ export class TaskDB {
       ? blockedBy.map(t => `- [${t.status}] ${t.title} (${t.id})`).join("\n")
       : "（无阻塞项）";
 
+    const eventsTruncated = (eventsTotal?.c ?? 0) > 5;
     const eventsSection = events.length > 0
       ? events.map(e => `- ${e.createdAt} [${e.action}] ${e.payload}`).join("\n")
       : "（无事件）";
+    const eventsNote = eventsTruncated ? `（已截断，共 ${eventsTotal.c} 条）` : "";
 
+    const commentsTruncated = (commentsTotal?.c ?? 0) > 5;
     const commentsSection = comments.length > 0
       ? comments.map(c => `- ${c.createdAt} [${c.actor}] ${c.body}`).join("\n")
       : "（无评论）";
+    const commentsNote = commentsTruncated ? `（已截断，共 ${commentsTotal.c} 条）` : "";
 
-    return [
+    const lines: string[] = [
       `# 任务简报 — ${task.title}`,
       "",
       "## 基本信息",
@@ -778,40 +811,43 @@ export class TaskDB {
       "## 任务描述",
       description,
       "",
-      "## 当前结果",
-      result,
-      "",
-      `## 阻塞项（${blockedBy.length} 个）`,
-      blockedBySection,
-      "",
-      `## 近期事件（最近 ${events.length} 条）`,
-      eventsSection,
-      "",
-      `## 评论（${comments.length} 条）`,
-      commentsSection,
-      "",
-      "---",
-      "## 完成后如何回填结果",
-      "",
-      "**你已通过 MCP 软件集成接入了 nerve-hub。** 直接用你的 MCP 工具调用：",
-      "",
-      "```",
-      `complete_task`,
-      `  id:     "${task.id}"`,
-      `  result: "一段话描述你完成了什么、关键输出是什么"`,
-      "```",
-      "",
-      "这与你平时调用其他 MCP 工具（如文件操作、代码执行）完全一样，",
-      "不需要 curl、不需要 HTTP 请求、不需要任何外部命令。",
-      "",
-      "**如果你的 MCP 集成当前不可用**，备选方案是写入文件：",
-      `    .nerve/inbox/${task.id}.done.json`,
-      "内容：",
-      "```json",
-      JSON.stringify({ taskId: task.id, result: "<结果描述>" }, null, 2),
-      "```",
-      "服务器每 5 秒轮询该目录，自动完成回填。",
-    ].join("\n");
+    ];
+
+    if (task.result) {
+      lines.push("## 当前结果");
+      lines.push(result);
+      lines.push("");
+    }
+
+    lines.push(`## 阻塞项（${blockedBy.length} 个）`);
+    lines.push(blockedBySection);
+    lines.push("");
+    lines.push(`## 近期事件（最近 ${events.length} 条）${eventsNote}`);
+    lines.push(eventsSection);
+    lines.push("");
+    lines.push(`## 评论（${comments.length} 条）${commentsNote}`);
+    lines.push(commentsSection);
+    lines.push("");
+    lines.push("---");
+    lines.push("## 完成后如何回填结果");
+    lines.push("");
+    lines.push("**你已通过 MCP 软件集成接入了 nerve-hub。** 直接用你的 MCP 工具调用：");
+    lines.push("");
+    lines.push("```");
+    lines.push(`complete_task`);
+    lines.push(`  id:     "${task.id}"`);
+    lines.push(`  result: "一段话描述你完成了什么、关键输出是什么"`);
+    lines.push("```");
+    lines.push("");
+    lines.push("**如果你的 MCP 集成当前不可用**，备选方案是写入文件：");
+    lines.push(`    .nerve/inbox/${task.id}.done.json`);
+    lines.push("内容：");
+    lines.push("```json");
+    lines.push(JSON.stringify({ taskId: task.id, result: "<结果描述>" }, null, 2));
+    lines.push("```");
+    lines.push("服务器每 5 秒轮询该目录，自动完成回填。");
+
+    return lines.join("\n");
   }
 
   // ─── Event helpers (public) ───────────────────────────────────────────
@@ -837,6 +873,7 @@ export class TaskDB {
       id: row.id,
       name: row.name,
       description: row.description,
+      rules: row.rules,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -881,6 +918,7 @@ export class TaskDB {
       lastSeen: row.last_seen ?? undefined,
       status: row.status,
       metadata: row.metadata ?? undefined,
+      capabilities: row.capabilities ?? undefined,
       createdAt: row.created_at,
     };
   }

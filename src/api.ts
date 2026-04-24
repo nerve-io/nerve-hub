@@ -227,6 +227,16 @@ export function createServer(db: TaskDB, port = 3141) {
           const type = url.searchParams.get("type") || undefined;
           const assignee = url.searchParams.get("assignee") || undefined;
           const search = url.searchParams.get("search") || undefined;
+          const limitParam = url.searchParams.get("limit");
+          const offsetParam = url.searchParams.get("offset");
+          const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+          const offset = offsetParam ? parseInt(offsetParam, 10) : undefined;
+          if (limitParam && (isNaN(limit!) || limit! < 1)) {
+            return badRequest("limit must be a positive integer");
+          }
+          if (offsetParam && (isNaN(offset!) || offset! < 0)) {
+            return badRequest("offset must be a non-negative integer");
+          }
 
           if (status && !VALID_STATUSES.has(status)) {
             return badRequest(`invalid status: "${status}". must be one of: pending, running, done, failed, blocked`);
@@ -238,7 +248,7 @@ export function createServer(db: TaskDB, port = 3141) {
             return badRequest(`invalid type: "${type}". must be one of: code, review, test, deploy, research, custom`);
           }
 
-          return Response.json(db.list({ projectId, status, priority, type, assignee, search }));
+          return Response.json(db.list({ projectId, status, priority, type, assignee, search, limit, offset }));
         }
 
         // ─── GET /tasks/:id ─────────────────────────────────────────────
@@ -323,7 +333,11 @@ export function createServer(db: TaskDB, port = 3141) {
         if (taskCommentsMatch && req.method === "GET") {
           const task = db.get(taskCommentsMatch[1]);
           if (!task) return Response.json({ error: "not found" }, { status: 404 });
-          return Response.json(db.listComments(taskCommentsMatch[1]));
+          const limitParam = url.searchParams.get("limit");
+          const offsetParam = url.searchParams.get("offset");
+          const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+          const offset = offsetParam ? parseInt(offsetParam, 10) : undefined;
+          return Response.json(db.listComments(taskCommentsMatch[1], { limit, offset }));
         }
 
         // ─── POST /tasks/:id/comments ─────────────────────────────────────
