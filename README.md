@@ -9,7 +9,7 @@ AI Agent 任务总线 — 个人本地使用，支持异构 Agent 协作。
 ### 安装依赖
 
 ```bash
-bun install
+bun run setup
 ```
 
 ### 启动服务（API + Web UI + Runner）
@@ -30,12 +30,12 @@ bun run dev
 
 以下产品已通过实际工作流验证，可与 nerve-hub 稳定协作。
 
-### Claude Desktop
+### Claude Desktop (Cowork 模式)
 
 - **角色**：任务调度方（Orchestrator）
-- **接入方式**：MCP stdio server，配置见下方"MCP 工具列表"章节
+- **接入方式**：MCP stdio server，`bun run release` 后复制输出的 JSON 到 Claude Desktop 配置
 - **能力**：创建项目/任务、生成 Briefing、认领任务、回填结果、查询事件日志
-- **验证状态**：✅ 所有 21 个 MCP 工具稳定可用
+- **验证状态**：✅ 所有 23 个 MCP 工具稳定可用
 
 ### TRAE SOLO（Code Solo 模式）
 
@@ -46,6 +46,16 @@ bun run dev
 - **已知限制**：
   - MTC Solo 模式无法发现/调用本地自定义 MCP（疑似产品 Bug，与 nerve-hub 无关）
   - 建议在**独立工作目录**执行任务，避免在 nerve-hub 仓库本身内工作（会产生语义混淆）
+
+### Google Antigravity
+
+- **角色**：任务执行方（Implementor）
+- **接入方式**：MCP stdio server，`bun run release` 后将输出的 JSON 复制到：
+  ```
+  ~/.gemini/antigravity/mcp_config.json
+  ```
+- **能力**：与 TRAE SOLO 相同，通过 MCP 工具收发任务
+- **验证状态**：✅ MCP 接入已验证可用
 
 ---
 
@@ -75,25 +85,26 @@ nerve-hub 由三部分组成：
 
 ## MCP 工具列表
 
-共 21 个工具。
+共 23 个工具。
 
 ### 项目管理
 
 | 工具 | 说明 |
 |------|------|
-| `create_project` | 创建项目（name, description?） |
+| `create_project` | 创建项目（name, description?, rules?） |
 | `list_projects` | 列出所有项目 |
-| `get_project_context` | 获取项目上下文（项目 + 任务 + 统计） |
+| `get_project_context` | 获取项目上下文（项目 + 任务 + 统计），支持 ID 或项目名 |
+| `get_project_rules` | 获取项目协作规则，支持 ID 或项目名（如 `"nerve-hub"`） |
 
 ### 任务管理
 
 | 工具 | 说明 |
 |------|------|
-| `create_task` | 创建任务（title, projectId?, description?, priority?, type?, assignee?, dependencies?） |
-| `list_tasks` | 列出任务，可按 projectId / status / priority / type / assignee 过滤 |
+| `create_task` | 创建任务（title, projectId?, description?, priority?, type?, assignee?, dependencies?, creator?） |
+| `list_tasks` | 列出任务，可按 projectId / status / priority / type / assignee 过滤，支持分页 |
 | `get_task` | 获取单个任务详情 |
 | `get_task_context` | 获取任务完整上下文（任务 + 项目 + 阻塞依赖 + 事件） |
-| `update_task` | 更新任务字段 |
+| `update_task` | 更新任务字段（creator 字段只读，传入时静默忽略） |
 | `delete_task` | 删除任务 |
 | `search_tasks` | 按关键词搜索任务（匹配标题和描述） |
 | `claim_task` | 认领任务：原子设置 status=running + assignee |
@@ -104,7 +115,7 @@ nerve-hub 由三部分组成：
 
 | 工具 | 说明 |
 |------|------|
-| `list_comments` | 获取任务评论列表 |
+| `list_comments` | 获取任务评论列表（支持分页） |
 | `create_comment` | 添加评论 |
 | `delete_comment` | 删除评论 |
 
@@ -112,8 +123,9 @@ nerve-hub 由三部分组成：
 
 | 工具 | 说明 |
 |------|------|
-| `register_agent` | 注册/更新 Agent 档案（id, name, type, endpoint?, heartbeat_interval?, metadata?） |
+| `register_agent` | 注册/更新 Agent 档案（id, name, type, endpoint?, capabilities?） |
 | `list_agents` | 列出所有 Agent |
+| `get_agent_rules` | 获取指定 Agent 的行为规则（Agent 启动时主动调用） |
 
 ### Handoff
 
@@ -128,20 +140,29 @@ nerve-hub 由三部分组成：
 |------|------|
 | `get_events` | 查询事件日志（projectId?, taskId?, limit?） |
 
-### Claude Desktop 配置
+### MCP 配置
 
+`bun run release` 执行后会打印标准 MCP JSON 配置片段，适用于所有支持 MCP stdio server 的产品：
+
+**Claude Desktop**：粘贴到 `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+**Google Antigravity**：粘贴到 `~/.gemini/antigravity/mcp_config.json`
+
+**TRAE SOLO / 其他产品**：参考各产品的 MCP 配置文档
+
+配置格式示例：
 ```json
 {
   "mcpServers": {
     "nerve-hub": {
-      "command": "bun",
-      "args": ["/absolute/path/to/nerve-hub/src/main.ts", "mcp"]
+      "command": "/path/to/nerve-hub-binary",
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-> **注意**：必须使用绝对路径，因为 Claude Desktop 的 cwd 不可预测。
+> `bun run release` 会输出包含正确绝对路径的完整配置，无需手动填写路径。
 
 ---
 
@@ -162,6 +183,7 @@ Base URL: `http://localhost:3141`，所有请求和响应均为 JSON。
 | POST | `/projects` | 创建项目 |
 | GET | `/projects` | 列出项目 |
 | GET | `/projects/:id` | 获取项目 |
+| PATCH | `/projects/:id` | 更新项目（name?, description?, rules?） |
 | DELETE | `/projects/:id` | 删除项目 |
 | GET | `/projects/:id/context` | 项目上下文 |
 | GET | `/projects/:id/blocked-statuses` | 批量阻塞状态 |
@@ -192,10 +214,12 @@ Base URL: `http://localhost:3141`，所有请求和响应均为 JSON。
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/agents` | 列出所有 Agent |
-| POST | `/agents` | 注册/更新 Agent |
+| POST | `/agents` | 注册/更新 Agent（upsert by id） |
 | GET | `/agents/:id` | 获取 Agent |
 | DELETE | `/agents/:id` | 删除 Agent |
 | PATCH | `/agents/:id/status` | 更新 Agent 状态 |
+| GET | `/agents/:id/rules` | 获取 Agent 行为规则（纯文本） |
+| PATCH | `/agents/:id/rules` | 更新 Agent 行为规则 |
 
 ### Handoff
 
@@ -239,6 +263,7 @@ Base URL: `http://localhost:3141`，所有请求和响应均为 JSON。
 | `assignee` | string | 负责人（Agent ID） |
 | `dependencies` | string[] | 依赖任务 ID 列表 |
 | `result` | string | 任务成果 |
+| `creator` | string | 创建方 Agent ID（只读，创建后不可修改） |
 | `projectId` | string | 所属项目 |
 | `createdAt` | string | 创建时间 |
 | `updatedAt` | string | 更新时间 |
@@ -254,6 +279,8 @@ Base URL: `http://localhost:3141`，所有请求和响应均为 JSON。
 | `heartbeatInterval` | number | 心跳间隔秒数（默认 60） |
 | `lastSeen` | string | 最后心跳时间 |
 | `status` | online / offline / busy | 当前状态 |
+| `capabilities` | object | Agent 能力描述（taskTypes, languages, priorities, description） |
+| `rules` | string | Agent 行为规则（Markdown，通过 `get_agent_rules` 读取） |
 | `metadata` | string | 扩展字段（JSON） |
 | `createdAt` | string | 创建时间 |
 
@@ -367,7 +394,7 @@ bun test
 
 ### 数据库迁移
 
-自动在启动时执行（`src/db.ts` migration 机制，当前版本 v8）。
+自动在启动时执行（`src/db.ts` migration 机制，当前版本 v12）。
 
 ### 环境变量
 

@@ -442,7 +442,10 @@ export class TaskDB {
   }
 
   getProject(id: string): Project | undefined {
-    const row = this.db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as any;
+    // Accept either UUID or project name (case-insensitive)
+    const row = this.db.prepare(
+      "SELECT * FROM projects WHERE id = ? OR lower(name) = lower(?)"
+    ).get(id, id) as any;
     return row ? this.toProject(row) : undefined;
   }
 

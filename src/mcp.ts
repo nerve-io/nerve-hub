@@ -20,7 +20,25 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
 import type { TaskDB } from "./db.js";
+
+// ─── Long-text offload ──────────────────────────────────────────────────────
+// Some MCP clients (e.g. TRAE SOLO) have dynamic response length limits.
+// When a text response exceeds this threshold, write it to a local file and
+// return a short anchor instead. The agent can then read the file with its
+// own file-reading tool (no context-length risk).
+const OFFLOAD_THRESHOLD = 800; // characters
+const CACHE_DIR = join(process.cwd(), ".nerve", "cache");
+
+function offloadIfLong(content: string, filename: string): string {
+  if (content.length <= OFFLOAD_THRESHOLD) return content;
+  mkdirSync(CACHE_DIR, { recursive: true });
+  const filePath = join(CACHE_DIR, filename);
+  writeFileSync(filePath, content, "utf-8");
+  return `[内容较长，已写入本地文件，请用文件读取工具读取完整内容]\n文件路径：${filePath}`;
+}
 
 const STATUS_ENUM = z.enum(["pending", "running", "done", "failed", "blocked"]);
 const PRIORITY_ENUM = z.enum(["critical", "high", "medium", "low"]);
@@ -265,13 +283,14 @@ export async function startMcp(db: TaskDB) {
     "get_project_rules",
     "Get project rules/collaboration guidelines. Returns '(此项目暂无协作规则)' if no rules set.",
     {
-      projectId: z.string().describe("Project ID"),
+      projectId: z.string().describe("Project ID or project name (e.g. 'nerve-hub')"),
     },
     async (args) => {
       const project = db.getProject(args.projectId);
       if (!project) return { content: [{ type: "text" as const, text: "Error: project not found" }], isError: true };
       const rules = project.rules || "(此项目暂无协作规则)";
-      return { content: [{ type: "text" as const, text: rules }] };
+      const safeId = args.projectId.replace(/[^a-zA-Z0-9_-]/g, "_");
+      return { content: [{ type: "text" as const, text: offloadIfLong(rules, `rules-project-${safeId}.md`) }] };
     }
   );
   _toolCount++;
@@ -345,8 +364,9 @@ export async function startMcp(db: TaskDB) {
     async (args) => {
       const agent = db.getAgent(args.agentId);
       if (!agent) return { content: [{ type: "text" as const, text: "Error: agent not found" }], isError: true };
-      const rules = agent.rules || "";
-      return { content: [{ type: "text" as const, text: rules }] };
+      const rules = agent.rules || "(此 Agent 暂无行为规则)";
+      const safeId = args.agentId.replace(/[^a-zA-Z0-9_-]/g, "_");
+      return { content: [{ type: "text" as const, text: offloadIfLong(rules, `rules-agent-${safeId}.md`) }] };
     }
   );
   _toolCount++;
