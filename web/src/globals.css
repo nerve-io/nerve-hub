@@ -33,7 +33,7 @@
 
     /* 状态色 (保留用于 inline style) */
     --status-pending: 0 0% 53%;
-    --status-running: 43 64% 51%;
+    --status-running: 217 91% 60%;
     --status-blocked: 37 91% 55%;
     --status-done: 153 59% 53%;
     --status-failed: 0 87% 60%;
@@ -41,7 +41,7 @@
     /* 优先级色 */
     --priority-critical: 0 87% 60%;
     --priority-high: 37 91% 55%;
-    --priority-medium: 0 0% 53%;
+    --priority-medium: 217 91% 60%;
     --priority-low: 0 0% 40%;
 
     /* 侧边栏宽度 */

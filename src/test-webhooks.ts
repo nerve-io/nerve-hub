@@ -35,21 +35,21 @@ async function setupTaskWithAgent(): Promise<{ taskId: string; agentId: string }
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: "Test Project" }),
   });
-  const project = await projRes.json();
+  const project = await projRes.json() as Record<string, any>;
 
   const agentRes = await fetch(BASE + "/agents", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id: "webhook-1", name: "Webhook Agent", type: "webhook", endpoint: "http://localhost:9999/hook" }),
   });
-  await agentRes.json();
+  const agent = await agentRes.json() as Record<string, any>;
 
   const taskRes = await fetch(BASE + "/tasks", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title: "Test task", assignee: "webhook-1", projectId: project.id }),
   });
-  const task = await taskRes.json();
+  const task = await taskRes.json() as Record<string, any>;
 
   return { taskId: task.id, agentId: "webhook-1" };
 }
@@ -64,12 +64,12 @@ describe("webhook callback", () => {
       body: JSON.stringify({ task_id: taskId, status: "done", result: "Task completed successfully" }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as Record<string, any>;
     expect(body.ok).toBe(true);
 
     // Verify task was updated
     const taskRes = await fetch(BASE + "/tasks/" + taskId);
-    const task = await taskRes.json();
+    const task = await taskRes.json() as Record<string, any>;
     expect(task.status).toBe("done");
     expect(task.result).toBe("Task completed successfully");
   });
@@ -85,7 +85,7 @@ describe("webhook callback", () => {
     expect(res.status).toBe(200);
 
     const taskRes = await fetch(BASE + "/tasks/" + taskId);
-    const task = await taskRes.json();
+    const task = await taskRes.json() as Record<string, any>;
     expect(task.status).toBe("failed");
     expect(task.result).toBe("Agent crashed");
   });
@@ -128,12 +128,12 @@ describe("webhook heartbeat", () => {
       body: JSON.stringify({ agent_id: agentId, status: "busy" }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as Record<string, any>;
     expect(body.ok).toBe(true);
 
     // Verify agent was updated
     const agentRes = await fetch(BASE + "/agents/" + agentId);
-    const agent = await agentRes.json();
+    const agent = await agentRes.json() as Record<string, any>;
     expect(agent.status).toBe("busy");
     expect(agent.lastSeen).toBeDefined();
   });

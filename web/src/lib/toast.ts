@@ -1,6 +1,6 @@
 import { toast as sonnerToast } from "sonner";
 
-type ToastType = "error" | "success" | "info";
+type ToastType = "error" | "success" | "info" | "warning";
 
 export function toast(message: string, type: ToastType = "error") {
   switch (type) {
@@ -10,6 +10,9 @@ export function toast(message: string, type: ToastType = "error") {
     case "info":
       sonnerToast.info(message);
       break;
+    case "warning":
+      sonnerToast.warning(message);
+      break;
     case "error":
     default:
       sonnerToast.error(message);
@@ -18,11 +21,30 @@ export function toast(message: string, type: ToastType = "error") {
 }
 
 export function toastWithUndo(message: string, onUndo: () => void) {
-  sonnerToast(message, {
-    duration: 30000,
-    action: {
-      label: "撤销",
-      onClick: onUndo,
-    },
-  });
+  let remaining = 30;
+  const toastId = `undo-${Date.now()}`;
+
+  const show = () => {
+    sonnerToast(message, {
+      id: toastId,
+      duration: remaining * 1000,
+      action: {
+        label: `撤销 (${remaining}s)`,
+        onClick: () => {
+          clearInterval(timer);
+          onUndo();
+        },
+      },
+    });
+  };
+
+  show();
+  const timer = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) {
+      clearInterval(timer);
+      return;
+    }
+    show();
+  }, 1000);
 }

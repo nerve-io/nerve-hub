@@ -69,8 +69,8 @@ async function dispatchPendingWebhookTasks(db: TaskDB, broadcast: BroadcastFn) {
         });
 
         if (res.ok) {
-          // Mark as in_progress immediately (idempotency)
-          db.update(task.id, { status: "in_progress" });
+          // Mark as running immediately (idempotency)
+          db.update(task.id, { status: "running" });
           db.updateAgentStatus(agent.id, "busy");
           db.logTaskDispatched(task.id, agent.id, agent.endpoint, task.projectId);
           broadcast({ type: "task.updated", projectId: task.projectId, taskId: task.id });

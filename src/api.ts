@@ -18,6 +18,10 @@
  *   PATCH  /tasks/:id         — update task
  *   DELETE /tasks/:id         — delete task
  *
+ * Agents:
+ *   PATCH  /agents/:id/rules  — update Agent rules
+ *   GET    /agents/:id/rules  — get Agent rules (纯文本)
+ *
  * Events:
  *   GET    /events            — list events (?projectId=&taskId=&limit=)
  */
@@ -161,6 +165,15 @@ export function createServer(db: TaskDB, port = 3141) {
           const project = db.getProject(projectMatch[1]);
           if (!project) return Response.json({ error: "not found" }, { status: 404 });
           return Response.json(project);
+        }
+
+        // ─── PATCH /projects/:id ────────────────────────────────────────
+        if (projectMatch && req.method === "PATCH") {
+          const body = await req.json() as { name?: string; description?: string; rules?: string };
+          const updated = db.updateProject(projectMatch[1], body);
+          if (!updated) return Response.json({ error: "not found" }, { status: 404 });
+          broadcast({ type: "project.updated", projectId: updated.id });
+          return Response.json(updated);
         }
 
         // ─── DELETE /projects/:id ───────────────────────────────────────
@@ -430,6 +443,28 @@ export function createServer(db: TaskDB, port = 3141) {
           if (!ok) return Response.json({ error: "not found" }, { status: 404 });
           broadcast({ type: "agent.status_changed", agentId: agentStatusMatch[1], status: body.status });
           return Response.json(db.getAgent(agentStatusMatch[1]));
+        }
+
+        // GET /agents/:id/rules
+        const agentRulesMatch = path.match(/^\/agents\/([^/]+)\/rules$/);
+        if (agentRulesMatch && req.method === "GET") {
+          const agent = db.getAgent(agentRulesMatch[1]);
+          if (!agent) return Response.json({ error: "not found" }, { status: 404 });
+          return new Response(agent.rules ?? '', {
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          });
+        }
+
+        // PATCH /agents/:id/rules
+        if (agentRulesMatch && req.method === "PATCH") {
+          const body = await req.json() as { rules: string };
+          if (typeof body.rules !== "string") {
+            return Response.json({ error: "rules must be a string" }, { status: 400 });
+          }
+          const updated = db.updateAgentRules(agentRulesMatch[1], body.rules);
+          if (!updated) return Response.json({ error: "not found" }, { status: 404 });
+          broadcast({ type: "agent.updated", agentId: updated.id });
+          return Response.json(updated);
         }
 
         // ─── Handoff Queue ───────────────────────────────────────────────

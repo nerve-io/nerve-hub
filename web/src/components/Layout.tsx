@@ -3,6 +3,7 @@ import { listProjects, getHandoffQueue } from '../api';
 import { Sidebar } from './Sidebar';
 import { SearchPalette } from './SearchPalette';
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut';
+import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { Project } from '../types';
 
@@ -17,14 +18,24 @@ export function Layout({ children, currentPath }: LayoutProps) {
   const [helpOpen, setHelpOpen] = useState(false);
   const [handoffCount, setHandoffCount] = useState(0);
 
+  const loadProjects = () => {
+    listProjects().then(setProjects).catch(() => {});
+  };
+
   const loadHandoffCount = () => {
     getHandoffQueue().then((tasks) => setHandoffCount(tasks.length)).catch(() => {});
   };
 
   useEffect(() => {
-    listProjects().then(setProjects).catch(() => {});
+    loadProjects();
     loadHandoffCount();
   }, []);
+
+  // 监听所有项目相关事件，包括创建和删除
+  useRealtimeSync(null, () => {
+    loadProjects();
+    loadHandoffCount();
+  });
 
   useKeyboardShortcut('k', () => setSearchOpen(true), { meta: true });
   useKeyboardShortcut('?', () => setHelpOpen(true));
@@ -32,7 +43,7 @@ export function Layout({ children, currentPath }: LayoutProps) {
   return (
     <div className="flex h-screen">
       <Sidebar projects={projects} currentPath={currentPath} handoffCount={handoffCount} />
-      <main className="flex-1 min-h-0 overflow-y-auto px-4 py-4 pt-14 md:px-8 md:py-6 md:pt-6 min-w-0">
+      <main className="flex-1 min-h-0 overflow-y-auto px-6 py-6 min-w-0">
         {children}
       </main>
 

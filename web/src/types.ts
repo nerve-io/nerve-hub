@@ -8,6 +8,7 @@ export interface Project {
   id: string;
   name: string;
   description: string;
+  rules?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -23,6 +24,7 @@ export interface Task {
   assignee: string;
   dependencies: string[];
   result: string;
+  creator: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -66,6 +68,13 @@ export interface Comment {
 export interface CreateProjectInput {
   name: string;
   description?: string;
+  rules?: string;
+}
+
+export interface UpdateProjectInput {
+  name?: string;
+  description?: string;
+  rules?: string;
 }
 
 export interface CreateTaskInput {
@@ -76,6 +85,7 @@ export interface CreateTaskInput {
   type?: TaskType;
   assignee?: string;
   dependencies?: string[];
+  creator?: string;
 }
 
 export interface UpdateTaskInput {
@@ -107,5 +117,10 @@ export interface Agent {
   lastSeen?: string;
   status: AgentStatus;
   metadata?: string;
+  capabilities?: {
+    taskTypes: string[];
+    languages: string[];
+  };
+  rules?: string;
   createdAt: string;
 }

@@ -102,26 +102,29 @@ export function TaskDetail({ taskId }: Props) {
 
       <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-6 items-start">
         {/* Left column */}
-        <div>
-          <InlineEdit
-            value={task.title}
-            onSave={(v) => handleInlineEdit('title', v)}
-            className="text-[22px] font-semibold tracking-tight mb-3"
-            tag="h1"
-            maxLength={200}
-          />
+        <div className="space-y-6">
+          <div>
+            <InlineEdit
+              value={task.title}
+              onSave={(v) => handleInlineEdit('title', v)}
+              className="text-[22px] font-semibold tracking-tight mb-3"
+              tag="h1"
+              maxLength={200}
+            />
 
-          <InlineEdit
-            value={task.description}
-            onSave={(v) => handleInlineEdit('description', v)}
-            className="text-sm text-muted-foreground mb-5 whitespace-pre-wrap min-h-5"
-            tag="p"
-            placeholder="No description"
-            multiline
-            maxLength={5000}
-          />
+            <InlineEdit
+              value={task.description}
+              onSave={(v) => handleInlineEdit('description', v)}
+              className="text-sm text-muted-foreground whitespace-pre-wrap min-h-5"
+              tag="p"
+              placeholder="No description"
+              multiline
+              maxLength={5000}
+              markdown
+            />
+          </div>
 
-          <div className="flex gap-2 mb-6 flex-wrap bg-card/40 backdrop-blur-sm rounded-xl p-4 border border-border/50">
+          <div className="flex gap-2 flex-wrap bg-card/40 backdrop-blur-sm rounded-xl p-4 border border-border/50">
             {task.status === 'pending' && (
               <Button onClick={() => handleStatusChange('running')}>
                 Claim → Running
@@ -148,7 +151,7 @@ export function TaskDetail({ taskId }: Props) {
           </div>
 
           {(task.status === 'done' || task.status === 'failed') && (
-            <div className="mb-6">
+            <div>
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Result</h3>
               <InlineEdit
                 value={task.result}
@@ -158,12 +161,13 @@ export function TaskDetail({ taskId }: Props) {
                 placeholder="No result"
                 multiline
                 maxLength={5000}
+                markdown
               />
             </div>
           )}
 
           {blockedBy.length > 0 && (
-            <div className="mb-6">
+            <div>
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Blocked By</h3>
               <div className="flex flex-col gap-1">
                 {blockedBy.map((dep) => (
@@ -187,8 +191,8 @@ export function TaskDetail({ taskId }: Props) {
         </div>
 
         {/* Right column */}
-        <div>
-          <Card className="mb-4">
+        <div className="space-y-4">
+          <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Details</CardTitle>
             </CardHeader>
@@ -208,6 +212,9 @@ export function TaskDetail({ taskId }: Props) {
                 </MetaRow>
                 <MetaRow label="Type">{task.type}</MetaRow>
                 <MetaRow label="Assignee">{task.assignee || '—'}</MetaRow>
+                {task.creator && (
+                  <MetaRow label="创建方">{task.creator}</MetaRow>
+                )}
                 {project && (
                   <MetaRow label="Project">
                     <Link to={`/projects/${project.id}`} className="no-underline cursor-pointer hover:text-primary">{project.name}</Link>

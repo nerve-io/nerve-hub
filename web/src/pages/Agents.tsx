@@ -18,6 +18,8 @@ const STATUS_COLORS: Record<string, string> = {
 export function Agents() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -27,6 +29,9 @@ export function Agents() {
   const [formType, setFormType] = useState<AgentType>('manual');
   const [formEndpoint, setFormEndpoint] = useState('');
   const [formHeartbeat, setFormHeartbeat] = useState('60');
+  const [formCapabilities, setFormCapabilities] = useState('');
+  const [formRules, setFormRules] = useState('');
+  const [capabilitiesError, setCapabilitiesError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
@@ -50,10 +55,41 @@ export function Agents() {
     setFormType('manual');
     setFormEndpoint('');
     setFormHeartbeat('60');
+    setFormCapabilities('');
+    setFormRules('');
+    setCapabilitiesError('');
+  };
+
+  const validateCapabilities = (value: string) => {
+    if (!value.trim()) {
+      setCapabilitiesError('');
+      return true;
+    }
+    try {
+      const parsed = JSON.parse(value);
+      if (typeof parsed !== 'object' || parsed === null) {
+        setCapabilitiesError('Must be a JSON object');
+        return false;
+      }
+      if (!Array.isArray(parsed.taskTypes)) {
+        setCapabilitiesError('taskTypes must be an array');
+        return false;
+      }
+      if (!Array.isArray(parsed.languages)) {
+        setCapabilitiesError('languages must be an array');
+        return false;
+      }
+      setCapabilitiesError('');
+      return true;
+    } catch (e) {
+      setCapabilitiesError('Invalid JSON format');
+      return false;
+    }
   };
 
   const handleCreate = async () => {
     if (!formId.trim() || !formName.trim()) return;
+    if (!validateCapabilities(formCapabilities)) return;
     setSubmitting(true);
     try {
       const input: Record<string, any> = {
@@ -65,6 +101,12 @@ export function Agents() {
         input.endpoint = formEndpoint.trim();
         input.heartbeatInterval = parseInt(formHeartbeat, 10) || 60;
       }
+      if (formCapabilities.trim()) {
+        input.capabilities = JSON.parse(formCapabilities.trim());
+      }
+      if (formRules.trim()) {
+        input.rules = formRules.trim();
+      }
       await registerAgent(input as any);
       setModalOpen(false);
       resetForm();
@@ -74,6 +116,19 @@ export function Agents() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleEdit = (agent: Agent) => {
+    setEditingAgent(agent);
+    setFormId(agent.id);
+    setFormName(agent.name);
+    setFormType(agent.type);
+    setFormEndpoint(agent.endpoint || '');
+    setFormHeartbeat((agent.heartbeatInterval || 60).toString());
+    setFormCapabilities(agent.capabilities ? JSON.stringify(agent.capabilities, null, 2) : '');
+    setFormRules(agent.rules || '');
+    setCapabilitiesError('');
+    setEditModalOpen(true);
   };
 
   const handleDelete = async () => {
@@ -117,6 +172,7 @@ export function Agents() {
                 <th className="px-4 py-3 font-medium">Type</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Last Seen</th>
+                <th className="px-4 py-3 font-medium">Capabilities</th>
                 <th className="px-4 py-3 font-medium text-right">Actions</th>
               </tr>
             </thead>
@@ -143,15 +199,49 @@ export function Agents() {
                   <td className="px-4 py-3 text-muted-foreground text-xs">
                     {agent.lastSeen ? relativeTime(agent.lastSeen) : '—'}
                   </td>
+                  <td className="px-4 py-3">
+                    {agent.capabilities && (
+                      <div className="flex flex-wrap gap-1 mb-2">
+                        {agent.capabilities.taskTypes?.map((type, index) => (
+                          <span key={index} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-500/15 text-blue-400">
+                            {type}
+                          </span>
+                        ))}
+                        {agent.capabilities.languages?.map((lang, index) => (
+                          <span key={index} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-500/15 text-green-400">
+                            {lang}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {agent.rules && (
+                      <details className="mt-2 text-xs text-gray-500">
+                        <summary className="cursor-pointer font-medium text-gray-600">查看规则</summary>
+                        <div className="mt-1 bg-gray-50 rounded p-2 whitespace-pre-wrap line-clamp-6">
+                          {agent.rules}
+                        </div>
+                      </details>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10 h-7 px-2 text-xs cursor-pointer"
-                      onClick={() => setConfirmDeleteId(agent.id)}
-                    >
-                      Delete
-                    </Button>
+                    <div className="flex gap-1 justify-end">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => handleEdit(agent)}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => setConfirmDeleteId(agent.id)}
+                      >
+                        Delete
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -219,6 +309,34 @@ export function Agents() {
               </div>
             </>
           )}
+          <div className="space-y-2">
+            <Label htmlFor="agent-capabilities">Capabilities (JSON)</Label>
+            <textarea
+              id="agent-capabilities"
+              placeholder='{"taskTypes": ["code", "review"], "languages": ["Chinese", "English"]}'
+              value={formCapabilities}
+              onChange={(e) => setFormCapabilities(e.target.value)}
+              onBlur={(e) => validateCapabilities(e.target.value)}
+              className={`w-full rounded-md border px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary min-h-[100px] ${capabilitiesError ? 'border-destructive' : 'bg-muted/50 border-border/50'}`}
+            />
+            {capabilitiesError && (
+              <p className="text-xs text-destructive">{capabilitiesError}</p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="agent-rules">
+              行为规则
+              <span className="ml-1 text-xs text-gray-400 font-normal">（可选，Markdown）</span>
+            </Label>
+            <textarea
+              id="agent-rules"
+              placeholder="本 Agent 的行为约束、自测规程、不允许的行为……"
+              value={formRules}
+              onChange={(e) => setFormRules(e.target.value)}
+              rows={5}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono bg-muted/50 border-border/50"
+            />
+          </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="ghost" onClick={() => setModalOpen(false)} size="sm">
               Cancel
@@ -229,6 +347,112 @@ export function Agents() {
               size="sm"
             >
               {submitting ? 'Registering...' : 'Register'}
+            </Button>
+          </div>
+        </div>
+      </AppDialog>
+
+      {/* Edit Dialog */}
+      <AppDialog open={editModalOpen} onClose={() => setEditModalOpen(false)} title="Edit Agent">
+        <div className="space-y-4 px-6 pb-6">
+          <div className="space-y-2">
+            <Label htmlFor="edit-agent-id">ID</Label>
+            <Input
+              id="edit-agent-id"
+              placeholder="e.g. claude-opus"
+              value={formId}
+              onChange={(e) => setFormId(e.target.value)}
+              className="bg-muted/50 border-border/50"
+              disabled
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-agent-name">Name</Label>
+            <Input
+              id="edit-agent-name"
+              placeholder="e.g. Claude Opus 4"
+              value={formName}
+              onChange={(e) => setFormName(e.target.value)}
+              className="bg-muted/50 border-border/50"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-agent-type">Type</Label>
+            <select
+              id="edit-agent-type"
+              value={formType}
+              onChange={(e) => setFormType(e.target.value as AgentType)}
+              className="w-full rounded-md border border-border/50 bg-muted/50 px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="manual">Manual</option>
+              <option value="webhook">Webhook</option>
+            </select>
+          </div>
+          {formType === 'webhook' && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="edit-agent-endpoint">Endpoint URL</Label>
+                <Input
+                  id="edit-agent-endpoint"
+                  placeholder="https://hooks.example.com/agent"
+                  value={formEndpoint}
+                  onChange={(e) => setFormEndpoint(e.target.value)}
+                  className="bg-muted/50 border-border/50"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-agent-heartbeat">Heartbeat Interval (seconds)</Label>
+                <Input
+                  id="edit-agent-heartbeat"
+                  type="number"
+                  value={formHeartbeat}
+                  onChange={(e) => setFormHeartbeat(e.target.value)}
+                  className="bg-muted/50 border-border/50"
+                />
+              </div>
+            </>
+          )}
+          <div className="space-y-2">
+            <Label htmlFor="edit-agent-capabilities">Capabilities (JSON)</Label>
+            <textarea
+              id="edit-agent-capabilities"
+              placeholder='{"taskTypes": ["code", "review"], "languages": ["Chinese", "English"]}'
+              value={formCapabilities}
+              onChange={(e) => setFormCapabilities(e.target.value)}
+              onBlur={(e) => validateCapabilities(e.target.value)}
+              className={`w-full rounded-md border px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary min-h-[100px] ${capabilitiesError ? 'border-destructive' : 'bg-muted/50 border-border/50'}`}
+            />
+            {capabilitiesError && (
+              <p className="text-xs text-destructive">{capabilitiesError}</p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-agent-rules">
+              行为规则
+              <span className="ml-1 text-xs text-gray-400 font-normal">（可选，Markdown）</span>
+            </Label>
+            <textarea
+              id="edit-agent-rules"
+              placeholder="本 Agent 的行为约束、自测规程、不允许的行为……"
+              value={formRules}
+              onChange={(e) => setFormRules(e.target.value)}
+              rows={5}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono bg-muted/50 border-border/50"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={() => setEditModalOpen(false)} size="sm">
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                handleCreate();
+                setEditModalOpen(false);
+              }}
+              disabled={!formId.trim() || !formName.trim() || submitting}
+              size="sm"
+            >
+              {submitting ? 'Updating...' : 'Update'}
             </Button>
           </div>
         </div>

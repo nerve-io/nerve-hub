@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { getProjectContext, getProjectBlockedStatuses, createTask, updateTask } from '../api';
+import { getProjectContext, getProjectBlockedStatuses, createTask, updateTask, listAgents } from '../api';
 import { AppDialog } from '@/components/ui/AppDialog';
 import { toast, toastWithUndo } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { statusColor, priorityColor } from '../utils';
+import MDEditor from '@uiw/react-md-editor';
+import { statusColor, priorityColor, typeColor } from '../utils';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut';
 import type { Task, TaskStatus, TaskPriority, TaskType } from '../types';
@@ -36,7 +37,11 @@ export function Kanban({ projectId }: Props) {
   const [formPriority, setFormPriority] = useState<TaskPriority>('medium');
   const [formType, setFormType] = useState<TaskType>('custom');
   const [formAssignee, setFormAssignee] = useState('');
-  const [formDeps, setFormDeps] = useState('');
+  const [formDep, setFormDep] = useState('');
+
+  // Agent state
+  const [agents, setAgents] = useState<any[]>([]);
+  const [loadingAgents, setLoadingAgents] = useState(false);
 
   // Filter state
   const [filterAssignee, setFilterAssignee] = useState('');
@@ -57,11 +62,25 @@ export function Kanban({ projectId }: Props) {
     }
   }, [projectId]);
 
+  // Load agents
+  const loadAgents = useCallback(async () => {
+    setLoadingAgents(true);
+    try {
+      const agentList = await listAgents();
+      setAgents(agentList);
+    } catch (err: any) {
+      toast(err.message);
+    } finally {
+      setLoadingAgents(false);
+    }
+  }, []);
+
   useEffect(() => {
     load();
+    loadAgents();
     const interval = setInterval(load, 30000);
     return () => clearInterval(interval);
-  }, [load]);
+  }, [load, loadAgents]);
 
   useRealtimeSync(projectId, load);
 
@@ -80,7 +99,7 @@ export function Kanban({ projectId }: Props) {
         priority: formPriority,
         type: formType,
         assignee: formAssignee.trim(),
-        dependencies: formDeps.trim() ? formDeps.split(',').map((s) => s.trim()).filter(Boolean) : [],
+        dependencies: formDep ? [formDep] : [],
       });
       setModalOpen(false);
       resetForm();
@@ -96,7 +115,7 @@ export function Kanban({ projectId }: Props) {
     setFormPriority('medium');
     setFormType('custom');
     setFormAssignee('');
-    setFormDeps('');
+    setFormDep('');
   };
 
   // Drag & Drop
@@ -189,7 +208,7 @@ export function Kanban({ projectId }: Props) {
           <SelectContent>
             <SelectItem value="all">All types</SelectItem>
             {TYPES.map((t) => (
-              <SelectItem key={t} value={t}>{t}</SelectItem>
+              <SelectItem key={t} value={t} color={typeColor(t)}>{t}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -200,7 +219,7 @@ export function Kanban({ projectId }: Props) {
           <SelectContent>
             <SelectItem value="all">All priorities</SelectItem>
             {PRIORITIES.map((p) => (
-              <SelectItem key={p} value={p}>{p}</SelectItem>
+              <SelectItem key={p} value={p} color={priorityColor(p)}>{p}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -286,6 +305,11 @@ export function Kanban({ projectId }: Props) {
                         </span>
                       )}
                     </div>
+                    {task.creator && (
+                      <span className="text-[11px] text-muted-foreground mt-1 inline-block">
+                        派单：{task.creator}
+                      </span>
+                    )}
                   </Link>
                 );
               })}
@@ -320,13 +344,13 @@ export function Kanban({ projectId }: Props) {
                 {formDesc.length}/5000
               </span>
             </div>
-            <Textarea
+            <MDEditor
               id="task-desc"
               value={formDesc}
-              onChange={(e) => setFormDesc(e.target.value)}
-              placeholder="Optional description"
-              rows={2}
-              maxLength={5000}
+              onChange={(v) => setFormDesc(v ?? '')}
+              height={150}
+              preview="live"
+              className="rounded border border-border"
             />
           </div>
           <div className="flex gap-3">
@@ -336,7 +360,7 @@ export function Kanban({ projectId }: Props) {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {PRIORITIES.map((p) => (
-                    <SelectItem key={p} value={p}>{p}</SelectItem>
+                    <SelectItem key={p} value={p} color={priorityColor(p)}>{p}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -347,29 +371,44 @@ export function Kanban({ projectId }: Props) {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                    <SelectItem key={t} value={t} color={typeColor(t)}>{t}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="task-assignee">Assignee</Label>
-            <Input
-              id="task-assignee"
-              value={formAssignee}
-              onChange={(e) => setFormAssignee(e.target.value)}
-              placeholder="e.g. agent-1"
-            />
+            <Label>Assignee</Label>
+            <Select value={formAssignee} onValueChange={setFormAssignee}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select agent" />
+              </SelectTrigger>
+              <SelectContent>
+                {loadingAgents ? (
+                  <SelectItem value="" disabled>Loading agents...</SelectItem>
+                ) : agents.length === 0 ? (
+                  <SelectItem value="" disabled>暂无可用 Agent</SelectItem>
+                ) : (
+                  agents.map((agent) => (
+                    <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="task-deps">Dependencies (task IDs, comma-separated)</Label>
-            <Input
-              id="task-deps"
-              value={formDeps}
-              onChange={(e) => setFormDeps(e.target.value)}
-              placeholder="uuid-1, uuid-2"
-            />
+            <Label>Depends on</Label>
+            <Select value={formDep} onValueChange={setFormDep}>
+              <SelectTrigger>
+                <SelectValue placeholder="None" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">None</SelectItem>
+                {tasks.map((task) => (
+                  <SelectItem key={task.id} value={task.id}>{task.title}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="ghost" onClick={() => setModalOpen(false)}>

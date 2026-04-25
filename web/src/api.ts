@@ -29,12 +29,15 @@ import type {
   Project,
   ProjectContext,
   CreateProjectInput,
+  UpdateProjectInput,
 } from './types';
 
 export const listProjects = () => request<Project[]>('/projects');
 export const getProject = (id: string) => request<Project>(`/projects/${id}`);
 export const createProject = (input: CreateProjectInput) =>
   request<Project>('/projects', { method: 'POST', body: JSON.stringify(input) });
+export const updateProject = (id: string, input: UpdateProjectInput) =>
+  request<Project>(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
 export const deleteProject = (id: string) =>
   request<{ deleted: boolean }>(`/projects/${id}`, { method: 'DELETE' });
 export const getProjectContext = (id: string) =>

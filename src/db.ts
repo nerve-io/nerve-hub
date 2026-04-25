@@ -47,6 +47,7 @@ export interface Task {
   assignee: string;
   dependencies: string[];
   result: string;
+  creator: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -59,6 +60,7 @@ export interface CreateTaskInput {
   type?: TaskType;
   assignee?: string;
   dependencies?: string[];
+  creator?: string;
 }
 
 export interface UpdateTaskInput {
@@ -135,6 +137,14 @@ export interface Comment {
 export type AgentType = 'webhook' | 'manual';
 export type AgentStatus = 'online' | 'offline' | 'busy';
 
+export interface AgentCapabilities {
+  taskTypes?: string[];
+  languages?: string[];
+  priorities?: string[];
+  description?: string;
+  [key: string]: unknown;
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -144,7 +154,8 @@ export interface Agent {
   lastSeen?: string;
   status: AgentStatus;
   metadata?: string;
-  capabilities?: string;
+  capabilities?: AgentCapabilities;
+  rules?: string;
   createdAt: string;
 }
 
@@ -277,6 +288,20 @@ const MIGRATIONS: Migration[] = [
     name: "add_agent_capabilities",
     up(db) {
       db.exec(`ALTER TABLE agents ADD COLUMN capabilities TEXT`);
+    },
+  },
+  {
+    version: 11,
+    name: "add_agent_rules",
+    up(db) {
+      addColumnIfNotExists(db, "agents", "rules", "TEXT NOT NULL DEFAULT ''");
+    },
+  },
+  {
+    version: 12,
+    name: "add_task_creator",
+    up(db) {
+      addColumnIfNotExists(db, "tasks", "creator", "TEXT NOT NULL DEFAULT ''");
     },
   },
 ];
@@ -426,6 +451,21 @@ export class TaskDB {
     return rows.map(r => this.toProject(r));
   }
 
+  updateProject(id: string, input: { name?: string; description?: string; rules?: string }): Project | undefined {
+    const now = new Date().toISOString();
+    const sets: string[] = [];
+    const vals: any[] = [];
+    if (input.name !== undefined) { sets.push("name = ?"); vals.push(input.name); }
+    if (input.description !== undefined) { sets.push("description = ?"); vals.push(input.description); }
+    if (input.rules !== undefined) { sets.push("rules = ?"); vals.push(input.rules); }
+    if (sets.length === 0) return this.getProject(id);
+    sets.push("updated_at = ?");
+    vals.push(now);
+    vals.push(id);
+    this.db.prepare(`UPDATE projects SET ${sets.join(", ")} WHERE id = ?`).run(...vals);
+    return this.getProject(id);
+  }
+
   deleteProject(id: string): boolean {
     const result = this.db.prepare("DELETE FROM projects WHERE id = ?").run(id);
     return result.changes > 0;
@@ -446,15 +486,16 @@ export class TaskDB {
       assignee: input.assignee ?? "",
       dependencies: input.dependencies ?? [],
       result: "",
+      creator: input.creator ?? '',
       createdAt: now,
       updatedAt: now,
     };
     this.db.prepare(
-      `INSERT INTO tasks (id, project_id, title, description, status, priority, type, assignee, dependencies, result, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(task.id, task.projectId, task.title, task.description, task.status, task.priority, task.type, task.assignee, JSON.stringify(task.dependencies), task.result, task.createdAt, task.updatedAt);
+      `INSERT INTO tasks (id, project_id, title, description, status, priority, type, assignee, dependencies, result, creator, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(task.id, task.projectId, task.title, task.description, task.status, task.priority, task.type, task.assignee, JSON.stringify(task.dependencies), task.result, task.creator, task.createdAt, task.updatedAt);
 
-    this.logEvent({ projectId: task.projectId, taskId: task.id, actor, action: "task.created", payload: { title: task.title } });
+    this.logEvent({ projectId: task.projectId, taskId: task.id, actor, action: "task.created", payload: { title: task.title, creator: task.creator } });
 
     return task;
   }
@@ -523,7 +564,9 @@ export class TaskDB {
     ).run(updated.projectId, updated.title, updated.description, updated.status, updated.priority, updated.type, updated.assignee, JSON.stringify(updated.dependencies), updated.result, updated.updatedAt, updated.id);
 
     // Log events
-    this.logEvent({ projectId: updated.projectId, taskId: id, actor, action: "task.updated", payload: Object.fromEntries(Object.entries(input)) });
+    const inputWithoutCreator = { ...input };
+    delete (inputWithoutCreator as any).creator;
+    this.logEvent({ projectId: updated.projectId, taskId: id, actor, action: "task.updated", payload: Object.fromEntries(Object.entries(inputWithoutCreator)) });
 
     if (input.status && input.status !== existing.status) {
       this.logEvent({ projectId: updated.projectId, taskId: id, actor, action: "task.status_changed", payload: { from: existing.status, to: input.status } });
@@ -699,7 +742,7 @@ export class TaskDB {
     endpoint?: string;
     heartbeatInterval?: number;
     metadata?: string;
-    capabilities?: string;
+    capabilities?: AgentCapabilities | string;
   }): Agent {
     const now = new Date().toISOString();
     this.db.prepare(`
@@ -719,7 +762,9 @@ export class TaskDB {
       input.endpoint ?? null,
       input.heartbeatInterval ?? null,
       input.metadata ?? null,
-      input.capabilities ?? null,
+      input.capabilities
+        ? (typeof input.capabilities === "string" ? input.capabilities : JSON.stringify(input.capabilities))
+        : null,
       now,
     );
     return this.getAgent(input.id)!;
@@ -749,6 +794,14 @@ export class TaskDB {
     `).run(status, lastSeen ?? null, id);
 
     return true;
+  }
+
+  updateAgentRules(id: string, rules: string): Agent | undefined {
+    const now = new Date().toISOString();
+    this.db.prepare(
+      `UPDATE agents SET rules = ?, updated_at = ? WHERE id = ?`
+    ).run(rules, now, id);
+    return this.getAgent(id);
   }
 
   // ─── Handoff Queue ────────────────────────────────────────────────────
@@ -891,6 +944,7 @@ export class TaskDB {
       assignee: row.assignee,
       dependencies: JSON.parse(row.dependencies || "[]"),
       result: row.result,
+      creator: row.creator ?? '',
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -918,7 +972,8 @@ export class TaskDB {
       lastSeen: row.last_seen ?? undefined,
       status: row.status,
       metadata: row.metadata ?? undefined,
-      capabilities: row.capabilities ?? undefined,
+      capabilities: row.capabilities ? JSON.parse(row.capabilities) : undefined,
+      rules: row.rules || undefined,
       createdAt: row.created_at,
     };
   }

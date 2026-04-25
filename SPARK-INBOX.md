@@ -14,7 +14,8 @@
 
 ## 待 Review
 
-<!-- 新想法加在这里 -->
+- [Neil] [2026-04-25] nerve-hub 本质上是一套极简 Jira，可系统调研市面主流项目管理 SaaS（Jira、Linear、Notion、Asana、Height 等），提炼出"人机协同 / Agent 半自动化项目管理"场景下真正需要的功能集，用于指导 nerve-hub 后续 roadmap
+- [Neil] [2026-04-25] AI Agent 全景研究报告（17款产品横评，定价/被动唤醒/性价比/Harness效应/自我进化，含选型决策树与市场格局分析）→ `.agent/research/AI-Agent-Landscape-2026-04.md`
 
 ---
 

@@ -53,9 +53,10 @@ export async function startMcp(db: TaskDB) {
       type: TYPE_ENUM.optional().describe("Task type: code, review, test, deploy, research, custom (default)"),
       assignee: z.string().optional().describe("Agent or person responsible for this task"),
       dependencies: z.array(z.string()).optional().describe("List of prerequisite task IDs — these tasks must be done before this one can start"),
+      creator: z.string().optional().describe("Task creator's Agent ID or name, empty if not provided"),
     },
     async (args) => {
-      const task = db.create({ title: args.title, projectId: args.projectId, description: args.description, priority: args.priority, type: args.type, assignee: args.assignee, dependencies: args.dependencies });
+      const task = db.create({ title: args.title, projectId: args.projectId, description: args.description, priority: args.priority, type: args.type, assignee: args.assignee, dependencies: args.dependencies, creator: args.creator });
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     }
   );
@@ -334,6 +335,22 @@ export async function startMcp(db: TaskDB) {
   );
   _toolCount++;
   _totalDescChars += "List all registered Agents and their current status".length;
+
+  server.tool(
+    "get_agent_rules",
+    "Get the specified Agent's behavior rules (Markdown plain text). Called by Agent on startup to get its own behavior constraints.",
+    {
+      agentId: z.string().describe("Agent ID"),
+    },
+    async (args) => {
+      const agent = db.getAgent(args.agentId);
+      if (!agent) return { content: [{ type: "text" as const, text: "Error: agent not found" }], isError: true };
+      const rules = agent.rules || "";
+      return { content: [{ type: "text" as const, text: rules }] };
+    }
+  );
+  _toolCount++;
+  _totalDescChars += "Get the specified Agent's behavior rules (Markdown plain text). Called by Agent on startup to get its own behavior constraints.".length;
 
   // ─── Comment Tools ─────────────────────────────────────────────────────
 

@@ -1,4 +1,9 @@
 import { useState, useEffect } from 'react';
+import MDEditor from '@uiw/react-md-editor';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
+import 'highlight.js/styles/github.css';
 
 interface InlineEditProps {
   value: string;
@@ -8,6 +13,7 @@ interface InlineEditProps {
   placeholder?: string;
   multiline?: boolean;
   maxLength?: number;
+  markdown?: boolean;
 }
 
 export function InlineEdit({
@@ -18,6 +24,7 @@ export function InlineEdit({
   placeholder = '',
   multiline = false,
   maxLength,
+  markdown = false,
 }: InlineEditProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -27,6 +34,28 @@ export function InlineEdit({
   }, [value]);
 
   if (!editing) {
+    if (markdown) {
+      return (
+        <div
+          className={`cursor-pointer rounded transition-colors p-0.5 px-1 -m-0.5 -mx-1 hover:bg-white/[0.04] ${!value ? 'text-muted-foreground italic' : ''} ${className || ''}`}
+          onClick={() => setEditing(true)}
+          title="Click to edit"
+        >
+          {value ? (
+            <div className="prose prose-sm max-w-none">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeHighlight]}
+              >
+                {value}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            placeholder
+          )}
+        </div>
+      );
+    }
     return (
       <Tag
         className={`cursor-pointer rounded transition-colors p-0.5 px-1 -m-0.5 -mx-1 hover:bg-white/[0.04] ${!value ? 'text-muted-foreground italic' : ''} ${className || ''}`}
@@ -50,6 +79,26 @@ export function InlineEdit({
 
   const inputBaseClass = `w-full bg-background border border-primary rounded px-2 py-1 resize-vertical ${className || ''}`;
   const overLimit = maxLength !== undefined && draft.length > maxLength;
+
+  if (markdown) {
+    return (
+      <div>
+        <MDEditor
+          value={draft}
+          onChange={(v) => setDraft(v ?? '')}
+          onBlur={save}
+          height={200}
+          preview="live"
+          className="rounded border border-primary"
+        />
+        {maxLength !== undefined && (
+          <div className={`text-[11px] mt-1 ${overLimit ? 'text-destructive' : 'text-muted-foreground'}`}>
+            {draft.length}/{maxLength}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   if (multiline) {
     return (

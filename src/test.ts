@@ -526,18 +526,17 @@ describe("task dependencies", () => {
 // ─── DB Migrations ────────────────────────────────────────────────────────────
 
 describe("db migrations", () => {
-  test("fresh DB: migrations table exists and version is 10", () => {
-    expect(db.getMigrationVersion()).toBe(10);
+  test("fresh DB: migrations table exists and version is 12", () => {
+    expect(db.getMigrationVersion()).toBe(12);
   });
 
-  test("fresh DB: all 10 migrations recorded", () => {
-    expect(db.getMigrationVersion()).toBe(10);
+  test("fresh DB: all 12 migrations recorded", () => {
+    expect(db.getMigrationVersion()).toBe(12);
   });
 
   test("idempotent: reopening the same DB does not throw", () => {
     const db2 = new TaskDB(TEST_DB);
-    expect(db2.getMigrationVersion()).toBe(10);
-    db2.close();
+    expect(db2.getMigrationVersion()).toBe(12);
   });
 
   test("fresh DB: all columns exist on tasks table", () => {

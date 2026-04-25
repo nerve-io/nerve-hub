@@ -39,17 +39,74 @@ export function priorityColor(priority: string): string {
   return map[priority] || 'hsl(var(--muted-foreground))';
 }
 
+export function typeColor(type: string): string {
+  const map: Record<string, string> = {
+    code: 'hsl(217, 91%, 60%)',
+    review: 'hsl(270, 80%, 60%)',
+    test: 'hsl(153, 59%, 53%)',
+    deploy: 'hsl(37, 91%, 55%)',
+    research: 'hsl(180, 80%, 60%)',
+    custom: 'hsl(var(--muted-foreground))',
+  };
+  return map[type] || 'hsl(var(--muted-foreground))';
+}
+
 export function formatAction(action: string, payload: string): string {
-  if (action === 'task.status_changed') {
-    try {
-      const p = JSON.parse(payload);
-      return `${p.from} → ${p.to}`;
-    } catch {
-      return action;
+  try {
+    const p = JSON.parse(payload);
+    
+    switch (action) {
+      case 'task.created':
+        return `创建了任务《${p.title || '未知任务'}》`;
+      case 'task.claimed':
+        return `领取了任务《${p.title || '未知任务'}》`;
+      case 'task.completed':
+        const duration = p.duration ? `，耗时 ${Math.round(p.duration / 60)} 分钟` : '';
+        return `完成了任务《${p.title || '未知任务'}》${duration}`;
+      case 'task.status_changed':
+        return `将《${p.title || '未知任务'}》状态改为 ${p.to}`;
+      case 'task.updated':
+        return `更新了任务《${p.title || '未知任务'}》`;
+      case 'agent.updated':
+      case 'agent.status_changed':
+        switch (p.status) {
+          case 'online':
+            return '上线';
+          case 'offline':
+            return '下线';
+          case 'busy':
+            return '变为忙碌';
+          default:
+            return `状态变为 ${p.status}`;
+        }
+      case 'comment.added':
+        return `在《${p.title || '未知任务'}》下留言`;
+      default:
+        return action;
     }
+  } catch {
+    return action;
   }
-  if (action === 'task.created') return 'created';
-  if (action === 'task.updated') return 'updated';
-  if (action === 'task.deleted') return 'deleted';
-  return action;
+}
+
+export function getEventColor(action: string): string {
+  switch (action) {
+    case 'task.created':
+      return 'hsl(153, 59%, 53%)'; // 绿色
+    case 'task.claimed':
+      return 'hsl(217, 91%, 60%)'; // 蓝色
+    case 'task.completed':
+      return 'hsl(153, 59%, 53%)'; // 绿色
+    case 'task.status_changed':
+      return 'hsl(37, 91%, 55%)'; // 橙色
+    case 'task.updated':
+      return 'hsl(217, 91%, 60%)'; // 蓝色
+    case 'agent.updated':
+    case 'agent.status_changed':
+      return 'hsl(180, 80%, 60%)'; // 青色
+    case 'comment.added':
+      return 'hsl(270, 80%, 60%)'; // 紫色
+    default:
+      return 'hsl(var(--muted-foreground))'; // 灰色
+  }
 }
