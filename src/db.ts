@@ -797,10 +797,9 @@ export class TaskDB {
   }
 
   updateAgentRules(id: string, rules: string): Agent | undefined {
-    const now = new Date().toISOString();
     this.db.prepare(
-      `UPDATE agents SET rules = ?, updated_at = ? WHERE id = ?`
-    ).run(rules, now, id);
+      `UPDATE agents SET rules = ? WHERE id = ?`
+    ).run(rules, id);
     return this.getAgent(id);
   }
 
