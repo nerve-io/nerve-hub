@@ -13,8 +13,8 @@ trap 'echo ""; echo "Shutting down..."; kill $(jobs -p) 2>/dev/null; wait 2>/dev
 free_port() {
   local port=$1
   local pid
-  pid=$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null)
-  if [ -n "$pid" ]; then
+  # Use if-guard to avoid set -e triggering on lsof non-zero exit (port free)
+  if pid=$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null); then
     echo "▶ Port $port in use (PID $pid), killing..."
     kill "$pid" 2>/dev/null
     sleep 1

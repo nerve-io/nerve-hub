@@ -444,6 +444,40 @@ bun test
 
 自动在启动时执行（`src/db.ts` migration 机制，当前版本 v12）。
 
+### Keychain 密钥管理
+
+Daemon 模式下，claude CLI 通过 `ANTHROPIC_BASE_URL` 将请求转发到 DeepSeek，需要携带 `ANTHROPIC_AUTH_TOKEN`（即 `DEEPSEEK_API_KEY`）。该密钥**不落盘**，只存储在 macOS Keychain 中。
+
+**一次性设置**：
+
+```bash
+security add-generic-password \
+  -s "nerve-hub-daemon" \
+  -a "deepseek-auth-token" \
+  -w "$DEEPSEEK_API_KEY"
+```
+
+之后 daemon 启动时通过 `security find-generic-password -w` 从 Keychain 读取，密钥只在内存中持有。launchd plist 中只保留非敏感的 URL 和模型名：
+
+| 变量 | 存储位置 | 敏感度 |
+|------|----------|--------|
+| `ANTHROPIC_AUTH_TOKEN` | **Keychain** | 密钥 |
+| `ANTHROPIC_API_KEY` | Keychain（与上面同值派生） | 密钥 |
+| `ANTHROPIC_BASE_URL` | launchd plist | 公开 |
+| `ANTHROPIC_MODEL` | launchd plist | 公开 |
+| `ANTHROPIC_DEFAULT_OPUS_MODEL` | launchd plist | 公开 |
+| `ANTHROPIC_DEFAULT_SONNET_MODEL` | launchd plist | 公开 |
+| `ANTHROPIC_DEFAULT_HAIKU_MODEL` | launchd plist | 公开 |
+| `CLAUDE_CODE_SUBAGENT_MODEL` | launchd plist | 公开 |
+| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | launchd plist | 公开 |
+| `CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK` | launchd plist | 公开 |
+| `CLAUDE_CODE_EFFORT_LEVEL` | launchd plist | 公开 |
+
+验证 Keychain 读取（需要 macOS 登录密码或 Touch ID）：
+```bash
+security find-generic-password -s "nerve-hub-daemon" -a "deepseek-auth-token" -w
+```
+
 ### 环境变量
 
 | 变量 | 说明 | 默认值 |
