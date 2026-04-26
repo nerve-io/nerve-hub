@@ -139,14 +139,14 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "create_task",
     "Create a new task",
     {
-      title: z.string().describe("Task title"),
-      projectId: z.string().optional().describe("Project ID to assign this task to"),
-      description: z.string().optional().describe("Task description"),
-      priority: PRIORITY_ENUM.optional().describe("Priority: critical, high, medium (default), low"),
-      type: TYPE_ENUM.optional().describe("Task type: code, review, test, deploy, research, custom (default)"),
-      assignee: z.string().optional().describe("Agent or person responsible for this task"),
-      dependencies: z.array(z.string()).optional().describe("List of prerequisite task IDs — these tasks must be done before this one can start"),
-      creator: z.string().optional().describe("Task creator's Agent ID or name, empty if not provided"),
+      title: z.string(),
+      projectId: z.string().optional(),
+      description: z.string().optional(),
+      priority: PRIORITY_ENUM.optional(),
+      type: TYPE_ENUM.optional(),
+      assignee: z.string().optional(),
+      dependencies: z.array(z.string()).optional(),
+      creator: z.string().optional(),
     },
     async (args) => {
       const creator = args.creator || agentInfo.uid || undefined;
@@ -161,8 +161,8 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "complete_task",
     "Complete a task: atomically set status to 'done' and write the result. Use this when work is finished.",
     {
-      id: z.string().describe("Task ID"),
-      result: z.string().describe("What was accomplished — summary, PR URL, output, etc."),
+      id: z.string(),
+      result: z.string(),
     },
     async (args) => {
       const task = db.update(args.id, { status: "done", result: args.result });
@@ -177,7 +177,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "get_agent_briefing",
     "Get a structured briefing for a task, including full context (description, blockers, events, comments) and action guide. Use this as working context for an AI Agent.",
     {
-      task_id: z.string().describe("Task ID"),
+      task_id: z.string(),
     },
     async (args) => {
       const briefing = db.generateBriefing(args.task_id);
@@ -192,8 +192,8 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "claim_task",
     "Claim a task: atomically set status to 'running' and assign it to an agent. Use this to pick up a task before starting work.",
     {
-      id: z.string().describe("Task ID"),
-      assignee: z.string().describe("Your name or agent identifier (e.g. claude, cursor, gpt)"),
+      id: z.string(),
+      assignee: z.string(),
     },
     async (args) => {
       const task = db.update(args.id, { status: "running", assignee: args.assignee });
@@ -208,15 +208,15 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "update_task",
     "Update task fields (title, description, status, priority, type, assignee, dependencies, result)",
     {
-      id: z.string().describe("Task ID"),
-      title: z.string().optional().describe("New title"),
-      description: z.string().optional().describe("New description"),
-      status: STATUS_ENUM.optional().describe("New status"),
-      priority: PRIORITY_ENUM.optional().describe("New priority"),
-      type: TYPE_ENUM.optional().describe("New type"),
-      assignee: z.string().optional().describe("New assignee"),
-      dependencies: z.array(z.string()).optional().describe("New dependency list — prerequisite task IDs"),
-      result: z.string().optional().describe("Task result — summary, URL, or any text"),
+      id: z.string(),
+      title: z.string().optional(),
+      description: z.string().optional(),
+      status: STATUS_ENUM.optional(),
+      priority: PRIORITY_ENUM.optional(),
+      type: TYPE_ENUM.optional(),
+      assignee: z.string().optional(),
+      dependencies: z.array(z.string()).optional(),
+      result: z.string().optional(),
     },
     async (args) => {
       const { id, ...updates } = args;
@@ -232,7 +232,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "get_task_context",
     "Get full task context: the task itself, its project (if any), unfinished dependencies, and recent event history. Call this before starting work on a task to inject full context into the current conversation.",
     {
-      id: z.string().describe("Task ID"),
+      id: z.string(),
     },
     async (args) => {
       const ctx = db.getTaskContext(args.id);
@@ -247,13 +247,13 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "list_tasks",
     "List tasks, optionally filtered by projectId, status, priority, type, and/or assignee",
     {
-      projectId: z.string().optional().describe("Filter by project ID"),
-      status: STATUS_ENUM.optional().describe("Filter by status: pending, running, done, failed, blocked"),
-      priority: PRIORITY_ENUM.optional().describe("Filter by priority: critical, high, medium, low"),
-      type: TYPE_ENUM.optional().describe("Filter by type: code, review, test, deploy, research, custom"),
-      assignee: z.string().optional().describe("Filter by assignee name"),
-      limit: z.number().optional().describe("Max tasks to return (default 10, max 100)"),
-      offset: z.number().optional().describe("Number of tasks to skip (for pagination)"),
+      projectId: z.string().optional(),
+      status: STATUS_ENUM.optional(),
+      priority: PRIORITY_ENUM.optional(),
+      type: TYPE_ENUM.optional(),
+      assignee: z.string().optional(),
+      limit: z.number().optional(),
+      offset: z.number().optional(),
     },
     async (args) => {
       const tasks = db.list({ projectId: args.projectId, status: args.status, priority: args.priority, type: args.type, assignee: args.assignee, limit: args.limit, offset: args.offset });
@@ -267,7 +267,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "get_task",
     "Get a task by ID",
     {
-      id: z.string().describe("Task ID"),
+      id: z.string(),
     },
     async (args) => {
       const task = db.get(args.id);
@@ -282,7 +282,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "get_blocked_by",
     "Get unfinished dependencies of a task. Returns a list of tasks that must be completed before this task can start. Use this to check if a task is ready to begin.",
     {
-      id: z.string().describe("Task ID"),
+      id: z.string(),
     },
     async (args) => {
       const task = db.get(args.id);
@@ -298,9 +298,9 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "get_events",
     "Query event log: task creations, status changes, updates, and deletions. Use this to understand what happened in a project or task.",
     {
-      projectId: z.string().optional().describe("Filter by project ID"),
-      taskId: z.string().optional().describe("Filter by task ID"),
-      limit: z.number().optional().describe("Max events to return (default 50, max 200)"),
+      projectId: z.string().optional(),
+      taskId: z.string().optional(),
+      limit: z.number().optional(),
     },
     async (args) => {
       const events = db.getEvents({ projectId: args.projectId, taskId: args.taskId, limit: args.limit });
@@ -314,8 +314,8 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "search_tasks",
     "Search tasks across projects by keyword (matches title and description)",
     {
-      query: z.string().describe("Search keyword"),
-      project_id: z.string().optional().describe("Limit to a specific project"),
+      query: z.string(),
+      project_id: z.string().optional(),
     },
     async (args) => {
       const tasks = db.list({ search: args.query, projectId: args.project_id });
@@ -331,9 +331,9 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "create_project",
     "Create a new project to group tasks",
     {
-      name: z.string().describe("Project name"),
-      description: z.string().optional().describe("Project description"),
-      rules: z.string().optional().describe("Project collaboration rules/guidelines"),
+      name: z.string(),
+      description: z.string().optional(),
+      rules: z.string().optional(),
     },
     async (args) => {
       const project = db.createProject({ name: args.name, description: args.description, rules: args.rules });
@@ -359,7 +359,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "get_project_rules",
     "Get project rules/collaboration guidelines. Returns '(此项目暂无协作规则)' if no rules set.",
     {
-      projectId: z.string().describe("Project ID or project name (e.g. 'nerve-hub')"),
+      projectId: z.string(),
     },
     async (args) => {
       const project = db.getProject(args.projectId);
@@ -376,7 +376,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "get_project_context",
     "Get project context: project info, all tasks, and status statistics. Use this to inject project state into a new conversation.",
     {
-      projectId: z.string().describe("Project ID"),
+      projectId: z.string(),
     },
     async (args) => {
       const ctx = db.getProjectContext(args.projectId);
@@ -395,13 +395,13 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "register_agent",
     "Register or update an Agent profile. If the id already exists, fields are updated (created_at and status are preserved).",
     {
-      id: z.string().describe("Agent unique identifier (same as assignee field)"),
-      name: z.string().describe("Display name"),
-      type: AGENT_TYPE_ENUM.describe("Agent type: webhook (HTTP callback) or manual (human-operated)"),
-      endpoint: z.string().optional().describe("Webhook URL (required when type=webhook)"),
-      heartbeat_interval: z.number().optional().describe("Heartbeat interval in seconds (default 60, webhook only)"),
-      metadata: z.string().optional().describe("JSON string for extension fields (e.g. capabilities)"),
-      capabilities: z.string().optional().describe("JSON string of agent capabilities (taskTypes, languages, priorities, description)"),
+      id: z.string(),
+      name: z.string(),
+      type: AGENT_TYPE_ENUM,
+      endpoint: z.string().optional(),
+      heartbeat_interval: z.number().optional(),
+      metadata: z.string().optional(),
+      capabilities: z.string().optional(),
     },
     async (args) => {
       const agent = db.registerAgent({
@@ -437,8 +437,8 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "issue_agent_credential",
     "Issue a new agent credential (token). Returns the token only once.",
     {
-      agentId: z.string().describe("Agent ID to issue credential for"),
-      expiresIn: z.number().optional().describe("Expiration time in seconds (optional, null for no expiration)"),
+      agentId: z.string(),
+      expiresIn: z.number().optional(),
     },
     async (args) => {
       // Generate token
@@ -480,7 +480,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "revoke_agent_credential",
     "Revoke an agent credential by key ID",
     {
-      kid: z.string().describe("Key ID to revoke"),
+      kid: z.string(),
     },
     async (args) => {
       const success = db.revokeAgentCredential(args.kid);
@@ -497,7 +497,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "list_agent_credentials",
     "List all credentials for an agent (excludes token plaintext)",
     {
-      agentId: z.string().describe("Agent ID"),
+      agentId: z.string(),
     },
     async (args) => {
       const credentials = db.listAgentCredentials(args.agentId);
@@ -516,7 +516,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "get_agent_rules",
     "Get the specified Agent's behavior rules (Markdown plain text). Called by Agent on startup to get its own behavior constraints. If agentId is omitted, returns the current agent's rules (based on NERVE_HUB_AGENT_NAME).",
     {
-      agentId: z.string().optional().describe("Agent ID — if omitted, returns your own rules"),
+      agentId: z.string().optional(),
     },
     async (args) => {
       const id = args.agentId || agentInfo.name;
@@ -610,8 +610,8 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "create_comment",
     "Add a comment/note to a task",
     {
-      task_id: z.string().describe("Task ID"),
-      body: z.string().describe("Comment content (max 2000 chars)"),
+      task_id: z.string(),
+      body: z.string(),
     },
     async (args) => {
       try {
@@ -629,9 +629,9 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "list_comments",
     "Get comments for a task (chronological order)",
     {
-      task_id: z.string().describe("Task ID"),
-      limit: z.number().optional().describe("Max comments to return (default 50, max 200)"),
-      offset: z.number().optional().describe("Number of comments to skip (for pagination)"),
+      task_id: z.string(),
+      limit: z.number().optional(),
+      offset: z.number().optional(),
     },
     async (args) => {
       const comments = db.listComments(args.task_id, { limit: args.limit, offset: args.offset });
@@ -661,7 +661,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "delete_task",
     "Delete a task",
     {
-      id: z.string().describe("Task ID"),
+      id: z.string(),
     },
     async (args) => {
       const ok = db.delete(args.id);
@@ -676,7 +676,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     "delete_comment",
     "Delete a comment",
     {
-      comment_id: z.string().describe("Comment ID"),
+      comment_id: z.string(),
     },
     async (args) => {
       const ok = db.deleteComment(args.comment_id);
