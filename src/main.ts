@@ -13,6 +13,7 @@ import { createServer } from "./api.js";
 import { startMcp } from "./mcp.js";
 import { startRunner } from "./runner.js";
 import { startInboxWatcher } from "./inbox.js";
+import { wakeClaudeDesktop } from "./wake-claude.js";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -52,7 +53,14 @@ if (cmd === "start") {
     Bun.sleepSync(500);
   }
 
-  const db = new TaskDB(DB_PATH);
+  const db = new TaskDB(DB_PATH, {
+    onBatchComplete: (projectId, stats) => {
+      const projectName = db.getProject(projectId)?.name ?? projectId;
+      const msg = `项目「${projectName}」全部任务已完成！\n完成: ${stats.doneCount} | 失败: ${stats.failedCount}`;
+      console.log(`[main] batch complete: ${msg}`);
+      wakeClaudeDesktop(msg);
+    },
+  });
   const { server, broadcast } = createServer(db, port);
   startRunner(db, broadcast);
   startInboxWatcher(db, DB_PATH);

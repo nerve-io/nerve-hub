@@ -104,6 +104,14 @@ function checkHeartbeatTimeouts(db: TaskDB, broadcast: BroadcastFn) {
         db.updateAgentStatus(agent.id, "offline");
         broadcast({ type: "agent.status_changed", agentId: agent.id, status: "offline" });
         console.log(`[runner] agent ${agent.id} marked offline (heartbeat timeout)`);
+
+        // Revert orphan running tasks back to pending
+        const runningTasks = db.list({ assignee: agent.id, status: "running" });
+        for (const task of runningTasks) {
+          db.update(task.id, { status: "pending" }, "system");
+          broadcast({ type: "task.updated", projectId: task.projectId, taskId: task.id });
+          console.log(`[runner] reverted task ${task.id} to pending (agent ${agent.id} went offline)`);
+        }
       }
     }
   } catch (err: any) {

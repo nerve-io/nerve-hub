@@ -11,7 +11,8 @@
     "test": "bun test ./src/test.ts ./src/test-agents.ts ./src/test-webhooks.ts",
     "release": "bash scripts/release.sh",
     "inspect": "npx -y @modelcontextprotocol/inspector bun run src/main.ts mcp",
-    "agent-setup": "bun scripts/agent-setup.ts"
+    "agent-setup": "bun scripts/agent-setup.ts",
+    "daemon": "bun run src/daemon.ts"
   },
   "keywords": [
     "ai",

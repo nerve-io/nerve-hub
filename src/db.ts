@@ -104,6 +104,8 @@ export interface EventFilter {
   limit?: number;
 }
 
+export type BatchCompleteFn = (projectId: string, stats: { total: number; doneCount: number; failedCount: number }) => void;
+
 // ─── Contexts ────────────────────────────────────────────────────────────────
 
 export interface ProjectContext {
@@ -364,12 +366,14 @@ export class TaskDB {
   private db: Database;
   /** Absolute path to the file-inbox directory (e.g. .nerve/inbox/). */
   readonly inboxDir: string;
+  private _onBatchComplete?: BatchCompleteFn;
 
-  constructor(dbPath: string) {
+  constructor(dbPath: string, hooks?: { onBatchComplete?: BatchCompleteFn }) {
     const dir = dirname(dbPath);
     this.inboxDir = process.env.NERVE_INBOX_PATH ?? join(dir, "inbox");
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
+    this._onBatchComplete = hooks?.onBatchComplete;
     this.db = new Database(dbPath);
     // busy_timeout: wait up to 10s instead of immediately throwing "database is locked".
     // Needed when MCP binary and dev server share the same DB file concurrently.
@@ -612,9 +616,27 @@ export class TaskDB {
 
     if (input.status && input.status !== existing.status) {
       this.logEvent({ projectId: updated.projectId, taskId: id, actor, action: "task.status_changed", payload: { from: existing.status, to: input.status } });
+      this._checkBatchComplete(updated, existing.status);
     }
 
     return updated;
+  }
+
+  // ─── Batch complete hook ──────────────────────────────────────────────
+
+  private _checkBatchComplete(task: Task, previousStatus: string): void {
+    if (!task.projectId) return;
+    const terminals = ["done", "failed"];
+    if (!terminals.includes(task.status) || terminals.includes(previousStatus)) return;
+
+    const allTasks = this.list({ projectId: task.projectId });
+    const allTerminal = allTasks.every(t => terminals.includes(t.status));
+    if (!allTerminal || !this._onBatchComplete) return;
+
+    const total = allTasks.length;
+    const doneCount = allTasks.filter(t => t.status === "done").length;
+    const failedCount = allTasks.filter(t => t.status === "failed").length;
+    this._onBatchComplete(task.projectId, { total, doneCount, failedCount });
   }
 
   delete(id: string, actor = "system"): boolean {
