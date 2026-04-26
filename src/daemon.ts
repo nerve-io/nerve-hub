@@ -129,7 +129,6 @@ async function executeTask(task: WebhookPayload): Promise<void> {
     "--bare",
     "--dangerously-skip-permissions",
     "--output-format", "json",
-    "--max-budget-usd", "0.50",
     "--session-id", task.task_id,
     "--add-dir", PROJECT_DIR,
   ], {
