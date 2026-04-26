@@ -28,10 +28,65 @@
 
 import type { TaskDB, CreateTaskInput, CreateProjectInput, UpdateTaskInput, AgentType, AgentStatus, AgentCredential } from "./db.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { registerMcpTools } from "./mcp.js";
 import { randomUUID, createHash, webcrypto } from "crypto";
 const crypto = webcrypto;
+
+// ─── Bun-compatible SSE Transport (classic MCP SSE protocol) ──────────
+// WebStandardStreamableHTTPServerTransport requires Accept header validation
+// and follows the Streamable HTTP spec, but TRAE IDE and other classic SSE
+// clients expect the older SSE protocol with `event: endpoint`.
+
+class BunSSETransport {
+  _sessionId: string;
+  _endpoint: string;
+  _controller: ReadableStreamDefaultController | null = null;
+  _stream: ReadableStream | null = null;
+  _keepAlive: ReturnType<typeof setInterval> | null = null;
+  onmessage: ((message: any, extra?: any) => void) | undefined;
+  onclose: (() => void) | undefined;
+  onerror: ((error: Error) => void) | undefined;
+
+  constructor(sessionId: string, endpoint: string) {
+    this._sessionId = sessionId;
+    this._endpoint = endpoint;
+  }
+
+  get sessionId() { return this._sessionId; }
+
+  async start() {
+    const self = this;
+    this._stream = new ReadableStream({
+      start(controller) {
+        self._controller = controller;
+        // Classic SSE: tell client where to POST
+        controller.enqueue(`event: endpoint\ndata: ${self._endpoint}?sessionId=${self._sessionId}\n\n`);
+        self._keepAlive = setInterval(() => {
+          try { controller.enqueue(': keepalive\n\n'); } catch { /* closed */ }
+        }, 15000);
+      },
+      cancel() {
+        if (self._keepAlive) { clearInterval(self._keepAlive); self._keepAlive = null; }
+        self._controller = null;
+        self.onclose?.();
+      }
+    });
+  }
+
+  async send(message: any) {
+    if (!this._controller) throw new Error('SSE not connected');
+    this._controller.enqueue(`event: message\ndata: ${JSON.stringify(message)}\n\n`);
+  }
+
+  async close() {
+    if (this._keepAlive) { clearInterval(this._keepAlive); this._keepAlive = null; }
+    if (this._controller) {
+      try { this._controller.close(); } catch {}
+    }
+    this._controller = null;
+    this.onclose?.();
+  }
+}
 
 // ─── Auth Types ──────────────────────────────────────────────────────────────
 
@@ -195,7 +250,7 @@ export function createServer(db: TaskDB, port = 3141) {
   const clients = new Set<import("bun").ServerWebSocket<unknown>>();
   
   // ─── MCP SSE Sessions ───────────────────────────────────────────────
-  const mcpSessions = new Map<string, { transport: WebStandardStreamableHTTPServerTransport; server: McpServer }>();
+  const mcpSessions = new Map<string, { transport: BunSSETransport; server: McpServer }>();
 
   function broadcast(event: { type: string; projectId?: string; taskId?: string; agentId?: string; status?: string }) {
     const msg = JSON.stringify(event);
@@ -253,44 +308,63 @@ export function createServer(db: TaskDB, port = 3141) {
         const authContext = await authenticateRequest(req, db);
         (req as RequestWithAuth).auth = authContext;
 
-        // ─── MCP over SSE ───────────────────────────────────────────────
-        if (path === "/mcp/sse" && req.method === "GET") {
-          // Authenticate request
+        // ─── MCP over SSE (classic SSE protocol) ──────────────────────────
+        if (path === "/mcp/sse") {
           const authContext = await authenticateRequest(req, db);
-          
           const agentName = url.searchParams.get("agentName") || authContext?.agentName;
           const agentUid = url.searchParams.get("agentUid") || undefined;
-          
-          const sessionId = randomUUID();
-          const transport = new WebStandardStreamableHTTPServerTransport({
-            sessionIdGenerator: () => sessionId
-          });
-          const mcpServer = new McpServer(
-            { name: "nerve-hub", version: "0.2.0" },
-            { capabilities: { tools: {} } }
-          );
-          registerMcpTools(mcpServer, db, { name: agentName, uid: agentUid });
-          await mcpServer.connect(transport);
-          
-          mcpSessions.set(sessionId, { transport, server: mcpServer });
-          
-          const originalClose = transport.onclose;
-          transport.onclose = () => {
-            mcpSessions.delete(sessionId);
-            if (originalClose) originalClose();
-          };
-          
-          return transport.handleRequest(req);
-        }
 
-        if (path === "/mcp/sse" && req.method === "POST") {
-          const sessionId = url.searchParams.get("sessionId");
-          if (!sessionId) return badRequest("Missing sessionId query parameter");
-          
-          const session = mcpSessions.get(sessionId);
-          if (!session) return new Response("Session not found", { status: 404 });
-          
-          return session.transport.handleRequest(req);
+          if (req.method === "GET") {
+            const sessionId = randomUUID();
+            const transport = new BunSSETransport(sessionId, "/api/mcp/sse");
+            const mcpServer = new McpServer(
+              { name: "nerve-hub", version: "0.3.0" },
+              { capabilities: { tools: {} } }
+            );
+            registerMcpTools(mcpServer, db, { name: agentName, uid: agentUid });
+            await mcpServer.connect(transport);
+
+            mcpSessions.set(sessionId, { transport, server: mcpServer });
+
+            return new Response(transport._stream!, {
+              headers: {
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive"
+              }
+            });
+          }
+
+          if (req.method === "POST") {
+            const sessionId = url.searchParams.get("sessionId");
+            if (!sessionId) return badRequest("Missing sessionId");
+
+            const session = mcpSessions.get(sessionId);
+            if (!session) return new Response("Session not found", { status: 404 });
+
+            let body: any;
+            try { body = await req.json(); } catch {
+              return badRequest("Invalid JSON");
+            }
+
+            await session.transport.onmessage?.(body);
+
+            return new Response("Accepted", { status: 202 });
+          }
+
+          if (req.method === "DELETE") {
+            const sessionId = url.searchParams.get("sessionId");
+            if (!sessionId) return badRequest("Missing sessionId");
+
+            const session = mcpSessions.get(sessionId);
+            if (!session) return new Response("Session not found", { status: 404 });
+
+            await session.transport.close();
+            mcpSessions.delete(sessionId);
+            return new Response("OK");
+          }
+
+          return new Response("Method not allowed", { status: 405 });
         }
 
         // ─── GET /events ────────────────────────────────────────────────
