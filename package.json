@@ -10,7 +10,8 @@
     "mcp": "bun run src/main.ts mcp",
     "test": "bun test ./src/test.ts ./src/test-agents.ts ./src/test-webhooks.ts",
     "release": "bash scripts/release.sh",
-    "inspect": "npx -y @modelcontextprotocol/inspector bun run src/main.ts mcp"
+    "inspect": "npx -y @modelcontextprotocol/inspector bun run src/main.ts mcp",
+    "agent-setup": "bun scripts/agent-setup.ts"
   },
   "keywords": [
     "ai",
@@ -21,6 +22,7 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@clack/prompts": "^1.2.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "zod": "^3.23.0"
   },

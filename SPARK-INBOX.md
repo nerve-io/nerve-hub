@@ -17,6 +17,7 @@
 - [Neil] [2026-04-25] nerve-hub 本质上是一套极简 Jira，可系统调研市面主流项目管理 SaaS（Jira、Linear、Notion、Asana、Height 等），提炼出"人机协同 / Agent 半自动化项目管理"场景下真正需要的功能集，用于指导 nerve-hub 后续 roadmap
 - [Neil] [2026-04-25] AI Agent 全景研究报告（17款产品横评，定价/被动唤醒/性价比/Harness效应/自我进化，含选型决策树与市场格局分析）→ `.agent/research/AI-Agent-Landscape-2026-04.md`
 - [Neil] [2026-04-25] Google Antigravity 已接入 nerve-hub MCP，是继 Claude Desktop / TRAE SOLO 之后第三个验证的 Agent 产品；后续可横向对比三款产品在 nerve-hub 任务流中的实际体验差异（工具发现率、调用稳定性、上下文利用效率等）
+- [Neil] [2026-04-26] 任务自动编号：Sprint 编号、任务序号等确定性 ID 应由代码生成并保证唯一性，不应依赖 Agent 推断——更广义的设计原则：**确定性任务归编程语言，非确定性任务归 Agent**。需对整个工程做一次全面 review，识别哪些地方当前在用 Agent 做本该由代码保证的事，系统性重构边界。
 - [Neil] [2026-04-25] nerve-hub 的目标用户是谁？目前完全没有定义过：是"有多个 AI Agent 在跑的个人开发者"，还是"小团队 + Agent 混合协作"，还是更广义的"任何想让 Agent 帮自己管任务的人"？这个定位会直接影响功能边界、入门体验设计（如 agent 身份配置的复杂度）、以及是否值得做成产品
 
 ---

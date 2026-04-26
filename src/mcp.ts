@@ -15,22 +15,107 @@
  *   claim_task           — claim a task (set running + assignee, atomic)
  *   complete_task        — complete a task (set done + result, atomic)
  *   delete_task          — delete a task
+ *   delete_comment       — delete a comment
+ *   whoami               — return current agent identity (name + uid)
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { mkdirSync, writeFileSync } from "fs";
-import { join } from "path";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
+import { dirname, join } from "path";
+import { homedir } from "os";
+import { createHash } from "crypto";
 import type { TaskDB } from "./db.js";
+
+// ─── Token Helpers ──────────────────────────────────────────────────────────
+
+function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+function readTokenFromCredentialsFile(): string | null {
+  // 1. Check NERVE_HUB_CREDENTIALS_FILE
+  if (process.env.NERVE_HUB_CREDENTIALS_FILE) {
+    const file = process.env.NERVE_HUB_CREDENTIALS_FILE;
+    if (existsSync(file)) {
+      try {
+        const content = readFileSync(file, 'utf-8');
+        const data = JSON.parse(content);
+        if (data.entries) {
+          // Use default_agent_id if set
+          if (data.default_agent_id && data.entries[data.default_agent_id]) {
+            return data.entries[data.default_agent_id].token;
+          }
+          // Fallback to first entry
+          const firstAgentId = Object.keys(data.entries)[0];
+          if (firstAgentId) {
+            return data.entries[firstAgentId].token;
+          }
+        }
+      } catch (err) {
+        console.error(`[mcp] Error reading credentials file: ${err}`);
+      }
+    }
+  }
+  
+  // 2. Check ~/.nerve/credentials.json
+  const defaultCredentialsFile = join(homedir(), '.nerve', 'credentials.json');
+  if (existsSync(defaultCredentialsFile)) {
+    try {
+      const content = readFileSync(defaultCredentialsFile, 'utf-8');
+      const data = JSON.parse(content);
+      if (data.entries) {
+        // Use default_agent_id if set
+        if (data.default_agent_id && data.entries[data.default_agent_id]) {
+          return data.entries[data.default_agent_id].token;
+        }
+        // Fallback to agent name from NERVE_HUB_AGENT_NAME
+        const agentName = process.env.NERVE_HUB_AGENT_NAME;
+        if (agentName) {
+          // Find agent by name (assuming entries are keyed by agentId, not name)
+          // This is a fallback and may not work if agentId != name
+          for (const [agentId, entry] of Object.entries(data.entries)) {
+            if (agentId === agentName) {
+              return (entry as any).token;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`[mcp] Error reading default credentials file: ${err}`);
+    }
+  }
+  
+  return null;
+}
+
+function getToken(): string | null {
+  // 1. Check NERVE_HUB_TOKEN
+  if (process.env.NERVE_HUB_TOKEN) {
+    return process.env.NERVE_HUB_TOKEN;
+  }
+  
+  // 2. Check credentials files
+  return readTokenFromCredentialsFile();
+}
 
 // ─── Long-text offload ──────────────────────────────────────────────────────
 // Some MCP clients (e.g. TRAE SOLO) have dynamic response length limits.
 // When a text response exceeds this threshold, write it to a local file and
 // return a short anchor instead. The agent can then read the file with its
 // own file-reading tool (no context-length risk).
+//
+// Cache directory: derived from NERVE_DB_PATH (same dir as the DB),
+// falling back to ~/.nerve/cache/.  NOT process.cwd() — the binary
+// may run with cwd=/ (EROFS).
 const OFFLOAD_THRESHOLD = 800; // characters
-const CACHE_DIR = join(process.cwd(), ".nerve", "cache");
+const CACHE_DIR = (() => {
+  if (process.env.NERVE_DB_PATH) {
+    return join(dirname(process.env.NERVE_DB_PATH), "cache");
+  }
+  return join(homedir(), ".nerve", "cache");
+})();
 
 function offloadIfLong(content: string, filename: string): string {
   if (content.length <= OFFLOAD_THRESHOLD) return content;
@@ -44,17 +129,7 @@ const STATUS_ENUM = z.enum(["pending", "running", "done", "failed", "blocked"]);
 const PRIORITY_ENUM = z.enum(["critical", "high", "medium", "low"]);
 const TYPE_ENUM = z.enum(["code", "review", "test", "deploy", "research", "custom"]);
 
-export async function startMcp(db: TaskDB) {
-  // Keep stdin open so the Node.js event loop never exits prematurely.
-  // This is critical: some MCP clients (e.g. 悟空钉钉) spawn the process
-  // and expect it to stay alive until the client closes the pipe.
-  process.stdin.resume();
-
-  const server = new McpServer(
-    { name: "nerve-hub", version: "0.2.0" },
-    { capabilities: { tools: {} } }
-  );
-
+export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { name?: string; uid?: string }) {
   let _toolCount = 0;
   let _totalDescChars = 0;
 
@@ -74,7 +149,8 @@ export async function startMcp(db: TaskDB) {
       creator: z.string().optional().describe("Task creator's Agent ID or name, empty if not provided"),
     },
     async (args) => {
-      const task = db.create({ title: args.title, projectId: args.projectId, description: args.description, priority: args.priority, type: args.type, assignee: args.assignee, dependencies: args.dependencies, creator: args.creator });
+      const creator = args.creator || agentInfo.uid || undefined;
+      const task = db.create({ title: args.title, projectId: args.projectId, description: args.description, priority: args.priority, type: args.type, assignee: args.assignee, dependencies: args.dependencies, creator });
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     }
   );
@@ -355,22 +431,178 @@ export async function startMcp(db: TaskDB) {
   _toolCount++;
   _totalDescChars += "List all registered Agents and their current status".length;
 
+  // ─── Agent Credential Tools ─────────────────────────────────────────────
+
   server.tool(
-    "get_agent_rules",
-    "Get the specified Agent's behavior rules (Markdown plain text). Called by Agent on startup to get its own behavior constraints.",
+    "issue_agent_credential",
+    "Issue a new agent credential (token). Returns the token only once.",
+    {
+      agentId: z.string().describe("Agent ID to issue credential for"),
+      expiresIn: z.number().optional().describe("Expiration time in seconds (optional, null for no expiration)"),
+    },
+    async (args) => {
+      // Generate token
+      const crypto = await import('crypto');
+      const randomBytes = new Uint8Array(32);
+      crypto.webcrypto.getRandomValues(randomBytes);
+      const token = `nh_${btoa(String.fromCharCode(...randomBytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')}`;
+      const keyId = `kid_${crypto.randomUUID().slice(0, 12)}`;
+      const tokenHash = hashToken(token);
+      
+      // Calculate expiration
+      let expiresAt: string | undefined;
+      if (args.expiresIn) {
+        const expiration = new Date();
+        expiration.setSeconds(expiration.getSeconds() + args.expiresIn);
+        expiresAt = expiration.toISOString();
+      }
+      
+      // Create credential
+      const credential = db.createAgentCredential({
+        agentId: args.agentId,
+        keyId,
+        tokenHash,
+        expiresAt,
+      });
+      
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        kid: keyId,
+        token,
+        issued_at: credential.issuedAt,
+        expires_at: credential.expiresAt,
+      }, null, 2) }] };
+    }
+  );
+  _toolCount++;
+  _totalDescChars += "Issue a new agent credential (token). Returns the token only once.".length;
+
+  server.tool(
+    "revoke_agent_credential",
+    "Revoke an agent credential by key ID",
+    {
+      kid: z.string().describe("Key ID to revoke"),
+    },
+    async (args) => {
+      const success = db.revokeAgentCredential(args.kid);
+      if (!success) {
+        return { content: [{ type: "text" as const, text: "Error: credential not found or already revoked" }], isError: true };
+      }
+      return { content: [{ type: "text" as const, text: "Revoked" }] };
+    }
+  );
+  _toolCount++;
+  _totalDescChars += "Revoke an agent credential by key ID".length;
+
+  server.tool(
+    "list_agent_credentials",
+    "List all credentials for an agent (excludes token plaintext)",
     {
       agentId: z.string().describe("Agent ID"),
     },
     async (args) => {
-      const agent = db.getAgent(args.agentId);
-      if (!agent) return { content: [{ type: "text" as const, text: "Error: agent not found" }], isError: true };
+      const credentials = db.listAgentCredentials(args.agentId);
+      // Remove tokenHash for security
+      const safeCredentials = credentials.map((cred) => {
+        const { tokenHash, ...safe } = cred;
+        return safe;
+      });
+      return { content: [{ type: "text" as const, text: JSON.stringify(safeCredentials, null, 2) }] };
+    }
+  );
+  _toolCount++;
+  _totalDescChars += "List all credentials for an agent (excludes token plaintext)".length;
+
+  server.tool(
+    "get_agent_rules",
+    "Get the specified Agent's behavior rules (Markdown plain text). Called by Agent on startup to get its own behavior constraints. If agentId is omitted, returns the current agent's rules (based on NERVE_HUB_AGENT_NAME).",
+    {
+      agentId: z.string().optional().describe("Agent ID — if omitted, returns your own rules"),
+    },
+    async (args) => {
+      const id = args.agentId || agentInfo.name;
+      if (!id) return { content: [{ type: "text" as const, text: "Error: no agentId provided and NERVE_HUB_AGENT_NAME is not set. Please set NERVE_HUB_AGENT_NAME in your MCP config, or pass an agentId." }], isError: true };
+      const agent = db.getAgent(id);
+      if (!agent) return { content: [{ type: "text" as const, text: `Error: agent "${id}" not found. Check your NERVE_HUB_AGENT_NAME or the agentId you passed.` }], isError: true };
       const rules = agent.rules || "(此 Agent 暂无行为规则)";
-      const safeId = args.agentId.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "_");
       return { content: [{ type: "text" as const, text: offloadIfLong(rules, `rules-agent-${safeId}.md`) }] };
     }
   );
   _toolCount++;
-  _totalDescChars += "Get the specified Agent's behavior rules (Markdown plain text). Called by Agent on startup to get its own behavior constraints.".length;
+  _totalDescChars += "Get the specified Agent's behavior rules (Markdown plain text). Called by Agent on startup to get its own behavior constraints. If agentId is omitted, returns the current agent's rules (based on NERVE_HUB_AGENT_NAME).".length;
+
+  server.tool(
+    "get_my_rules",
+    "Use this on startup to get your own behavior rules. No parameters needed — identifies you automatically via token or NERVE_HUB_AGENT_NAME.",
+    {},
+    async () => {
+      let agentId: string | null = null;
+      let authMethod: string = "legacy-env";
+      
+      // Try token authentication first
+      const token = getToken();
+      if (token) {
+        const tokenHash = hashToken(token);
+        const credential = db.getAgentCredentialByTokenHash(tokenHash);
+        if (credential) {
+          agentId = credential.agentId;
+          authMethod = "token";
+        }
+      }
+      
+      // Fallback to legacy env
+      if (!agentId) {
+        agentId = agentInfo.name || null;
+      }
+      
+      if (!agentId) return { content: [{ type: "text" as const, text: "Error: No agent identity found. Please set NERVE_HUB_TOKEN or NERVE_HUB_AGENT_NAME in your MCP config." }], isError: true };
+      
+      const agent = db.getAgent(agentId);
+      if (!agent) return { content: [{ type: "text" as const, text: `Error: agent "${agentId}" not found. Make sure you are registered (try register_agent or contact the project admin).` }], isError: true };
+      
+      const rules = agent.rules || "(此 Agent 暂无行为规则)";
+      const safeId = agentId.replace(/[^a-zA-Z0-9_-]/g, "_");
+      return { content: [{ type: "text" as const, text: offloadIfLong(rules, `rules-agent-${safeId}.md`) }] };
+    }
+  );
+  _toolCount++;
+  _totalDescChars += "Use this on startup to get your own behavior rules. No parameters needed — identifies you automatically via token or NERVE_HUB_AGENT_NAME.".length;
+
+  server.tool(
+    "whoami",
+    "Return the current agent's identity (agentId + name) as identified via token or NERVE_HUB_AGENT_NAME.",
+    {},
+    async () => {
+      let agentId: string | null = null;
+      let agentName: string = "(not set)";
+      let authMethod: string = "legacy-env";
+      
+      // Try token authentication first
+      const token = getToken();
+      if (token) {
+        const tokenHash = hashToken(token);
+        const credential = db.getAgentCredentialByTokenHash(tokenHash);
+        if (credential) {
+          agentId = credential.agentId;
+          authMethod = "token";
+          const agent = db.getAgent(agentId);
+          if (agent) {
+            agentName = agent.name;
+          }
+        }
+      }
+      
+      // Fallback to legacy env
+      if (!agentId) {
+        agentId = agentInfo.name || "(not set)";
+        agentName = agentInfo.name || "(not set)";
+      }
+      
+      return { content: [{ type: "text" as const, text: JSON.stringify({ agentId, name: agentName, authMethod }, null, 2) }] };
+    }
+  );
+  _toolCount++;
+  _totalDescChars += "Return the current agent's identity (agentId + name) as identified via token or NERVE_HUB_AGENT_NAME.".length;
 
   // ─── Comment Tools ─────────────────────────────────────────────────────
 
@@ -457,6 +689,23 @@ export async function startMcp(db: TaskDB) {
 
   // Audit: log tool count and description character count
   console.error(`[nerve-hub] Registered ${_toolCount} tools (total desc chars: ${_totalDescChars})`);
+}
+
+export async function startMcp(db: TaskDB) {
+  // Keep stdin open so the Node.js event loop never exits prematurely.
+  // This is critical: some MCP clients (e.g. 悟空钉钉) spawn the process
+  // and expect it to stay alive until the client closes the pipe.
+  process.stdin.resume();
+
+  const server = new McpServer(
+    { name: "nerve-hub", version: "0.2.0" },
+    { capabilities: { tools: {} } }
+  );
+
+  registerMcpTools(server, db, {
+    name: process.env.NERVE_HUB_AGENT_NAME,
+    uid: process.env.NERVE_HUB_AGENT_UID
+  });
 
   // ─── Connect ─────────────────────────────────────────────────────────────
 

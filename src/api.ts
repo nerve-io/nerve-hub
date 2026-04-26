@@ -26,7 +26,25 @@
  *   GET    /events            — list events (?projectId=&taskId=&limit=)
  */
 
-import type { TaskDB, CreateTaskInput, CreateProjectInput, UpdateTaskInput, AgentType, AgentStatus } from "./db.js";
+import type { TaskDB, CreateTaskInput, CreateProjectInput, UpdateTaskInput, AgentType, AgentStatus, AgentCredential } from "./db.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { registerMcpTools } from "./mcp.js";
+import { randomUUID, createHash, webcrypto } from "crypto";
+const crypto = webcrypto;
+
+// ─── Auth Types ──────────────────────────────────────────────────────────────
+
+interface AuthContext {
+  agentId: string;
+  agentName?: string;
+  keyId?: string;
+  authMethod: 'token' | 'legacy-env';
+}
+
+interface RequestWithAuth extends Request {
+  auth: AuthContext | null | undefined;
+}
 
 const VALID_STATUSES = new Set(["pending", "running", "done", "failed", "blocked"]);
 const VALID_PRIORITIES = new Set(["critical", "high", "medium", "low"]);
@@ -70,9 +88,114 @@ function getActor(req: Request): string {
   return req.headers.get("x-nerve-agent") || "system";
 }
 
+// ─── Auth Helpers ────────────────────────────────────────────────────────────
+
+function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+function extractToken(req: Request): string | null {
+  // 1. Authorization: Bearer nh_<token>
+  const authHeader = req.headers.get('authorization');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.slice(7).trim();
+    if (token.startsWith('nh_')) {
+      return token;
+    }
+  }
+  
+  // 2. X-Nerve-Token: nh_<token>
+  const xNerveToken = req.headers.get('X-Nerve-Token');
+  if (xNerveToken && xNerveToken.startsWith('nh_')) {
+    return xNerveToken;
+  }
+  
+  return null;
+}
+
+async function authenticateRequest(req: Request, db: TaskDB): Promise<AuthContext | null> {
+  // Try token authentication first
+  const token = extractToken(req);
+  if (token) {
+    const tokenHash = hashToken(token);
+    const credential = db.getAgentCredentialByTokenHash(tokenHash);
+    
+    if (!credential) {
+      return null; // Invalid token
+    }
+    
+    // Check status
+    if (credential.status !== 'active') {
+      return null; // Token not active
+    }
+    
+    // Check expiration
+    if (credential.expiresAt && new Date(credential.expiresAt) < new Date()) {
+      return null; // Token expired
+    }
+    
+    // Check revocation
+    if (credential.revokedAt) {
+      return null; // Token revoked
+    }
+    
+    // Update last used at
+    db.updateAgentCredentialLastUsed(tokenHash);
+    
+    // Get agent info
+    const agent = db.getAgent(credential.agentId);
+    if (!agent) {
+      return null; // Agent not found
+    }
+    
+    return {
+      agentId: credential.agentId,
+      agentName: agent.name,
+      keyId: credential.keyId,
+      authMethod: 'token',
+    };
+  }
+  
+  // Fallback to legacy env vars
+  const agentName = process.env.NERVE_HUB_AGENT_NAME;
+  const agentUid = process.env.NERVE_HUB_AGENT_UID;
+  
+  if (agentName) {
+    // Find agent by name
+    const agents = db.listAgents();
+    const agent = agents.find(a => a.name === agentName);
+    
+    if (agent) {
+      console.log(`[auth] legacy-env: ${agent.name} (${agent.id})`);
+      return {
+        agentId: agent.id,
+        agentName: agent.name,
+        authMethod: 'legacy-env',
+      };
+    }
+  }
+  
+  return null;
+}
+
+function unauthorized(message: string = 'Unauthorized'): Response {
+  return new Response(message, { status: 401 });
+}
+
+function forbidden(message: string = 'Forbidden'): Response {
+  return new Response(message, { status: 403 });
+}
+
+function notFound(message: string = 'Not found'): Response {
+  return new Response(message, { status: 404 });
+}
+
 export function createServer(db: TaskDB, port = 3141) {
   // ─── WebSocket clients ──────────────────────────────────────────────
   const clients = new Set<import("bun").ServerWebSocket<unknown>>();
+  
+  // ─── MCP SSE Sessions ───────────────────────────────────────────────
+  const mcpSessions = new Map<string, { transport: WebStandardStreamableHTTPServerTransport; server: McpServer }>();
 
   function broadcast(event: { type: string; projectId?: string; taskId?: string; agentId?: string; status?: string }) {
     const msg = JSON.stringify(event);
@@ -124,6 +247,50 @@ export function createServer(db: TaskDB, port = 3141) {
         // ─── Health ──────────────────────────────────────────────────────
         if (path === "/health") {
           return Response.json({ status: "ok" });
+        }
+
+        // ─── Authenticate request ───────────────────────────────────────
+        const authContext = await authenticateRequest(req, db);
+        (req as RequestWithAuth).auth = authContext;
+
+        // ─── MCP over SSE ───────────────────────────────────────────────
+        if (path === "/mcp/sse" && req.method === "GET") {
+          // Authenticate request
+          const authContext = await authenticateRequest(req, db);
+          
+          const agentName = url.searchParams.get("agentName") || authContext?.agentName;
+          const agentUid = url.searchParams.get("agentUid") || undefined;
+          
+          const sessionId = randomUUID();
+          const transport = new WebStandardStreamableHTTPServerTransport({
+            sessionIdGenerator: () => sessionId
+          });
+          const mcpServer = new McpServer(
+            { name: "nerve-hub", version: "0.2.0" },
+            { capabilities: { tools: {} } }
+          );
+          registerMcpTools(mcpServer, db, { name: agentName, uid: agentUid });
+          await mcpServer.connect(transport);
+          
+          mcpSessions.set(sessionId, { transport, server: mcpServer });
+          
+          const originalClose = transport.onclose;
+          transport.onclose = () => {
+            mcpSessions.delete(sessionId);
+            if (originalClose) originalClose();
+          };
+          
+          return transport.handleRequest(req);
+        }
+
+        if (path === "/mcp/sse" && req.method === "POST") {
+          const sessionId = url.searchParams.get("sessionId");
+          if (!sessionId) return badRequest("Missing sessionId query parameter");
+          
+          const session = mcpSessions.get(sessionId);
+          if (!session) return new Response("Session not found", { status: 404 });
+          
+          return session.transport.handleRequest(req);
         }
 
         // ─── GET /events ────────────────────────────────────────────────
@@ -467,6 +634,49 @@ export function createServer(db: TaskDB, port = 3141) {
           return Response.json(updated);
         }
 
+        // ─── Token Issuance (protected) ───────────────────────────────────
+
+        // POST /agents/:agentId/credentials
+        const agentCredentialsMatch = path.match(/^\/agents\/([^/]+)\/credentials$/);
+        if (agentCredentialsMatch && req.method === "POST") {
+          // Check if request is from localhost or has operator token
+          const clientIP = server.requestIP(req);
+          const operatorToken = process.env.NERVE_HUB_OPERATOR_TOKEN;
+          const authHeader = req.headers.get('authorization');
+          const hasValidOperatorToken = operatorToken && authHeader === `Bearer ${operatorToken}`;
+          
+          const isLocalhost = typeof clientIP === 'string' ? clientIP === '127.0.0.1' : clientIP?.address === '127.0.0.1';
+          
+          if (!isLocalhost && !hasValidOperatorToken) {
+            return forbidden('Only localhost or operator can issue credentials');
+          }
+          
+          const agentId = agentCredentialsMatch[1];
+          const agent = db.getAgent(agentId);
+          if (!agent) return notFound('Agent not found');
+          
+          // Generate token
+          const randomBytes = new Uint8Array(32);
+          crypto.getRandomValues(randomBytes);
+          const token = `nh_${btoa(String.fromCharCode(...randomBytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')}`;
+          const keyId = `kid_${randomUUID().slice(0, 12)}`;
+          const tokenHash = hashToken(token);
+          
+          // Create credential
+          const credential = db.createAgentCredential({
+            agentId,
+            keyId,
+            tokenHash,
+          });
+          
+          return Response.json({
+            kid: keyId,
+            token,
+            issued_at: credential.issuedAt,
+            expires_at: credential.expiresAt,
+          });
+        }
+
         // ─── Handoff Queue ───────────────────────────────────────────────
 
         // GET /handoff
@@ -480,6 +690,39 @@ export function createServer(db: TaskDB, port = 3141) {
           const briefing = db.generateBriefing(briefingMatch[1]);
           if (!briefing) return Response.json({ error: "not found" }, { status: 404 });
           return Response.json({ taskId: briefingMatch[1], briefing });
+        }
+
+        // ─── Me Endpoints (require auth) ───────────────────────────────────
+
+        // GET /me
+        if (path === "/me" && req.method === "GET") {
+          const auth = (req as RequestWithAuth).auth;
+          if (!auth) return unauthorized();
+          
+          const agent = db.getAgent(auth.agentId);
+          if (!agent) return notFound();
+          
+          return Response.json({
+            agentId: auth.agentId,
+            name: agent.name,
+            scopes: [], // MVP: no scopes
+            keyId: auth.keyId,
+            issuedAt: auth.authMethod === 'token' ? new Date().toISOString() : undefined,
+            expiresAt: undefined, // MVP: no expiration
+          });
+        }
+
+        // GET /me/rules
+        if (path === "/me/rules" && req.method === "GET") {
+          const auth = (req as RequestWithAuth).auth;
+          if (!auth) return unauthorized();
+          
+          const agent = db.getAgent(auth.agentId);
+          if (!agent) return notFound();
+          
+          return new Response(agent.rules ?? '(此 Agent 暂无规则)', {
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          });
         }
 
         // ─── Webhooks ───────────────────────────────────────────────────

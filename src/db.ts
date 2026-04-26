@@ -159,6 +159,23 @@ export interface Agent {
   createdAt: string;
 }
 
+// ─── Agent Credentials ───────────────────────────────────────────────────────
+
+export type AgentCredentialStatus = 'active' | 'revoked' | 'expired';
+
+export interface AgentCredential {
+  id: string;
+  agentId: string;
+  keyId: string;
+  tokenHash: string;
+  status: AgentCredentialStatus;
+  issuedAt: string;
+  expiresAt?: string;
+  revokedAt?: string;
+  lastUsedAt?: string;
+  createdBy: string;
+}
+
 // ─── Migrations ──────────────────────────────────────────────────────────────
 
 interface Migration {
@@ -302,6 +319,28 @@ const MIGRATIONS: Migration[] = [
     name: "add_task_creator",
     up(db) {
       addColumnIfNotExists(db, "tasks", "creator", "TEXT NOT NULL DEFAULT ''");
+    },
+  },
+  {
+    version: 13,
+    name: "add_agent_credentials_table",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_credentials (
+          id          TEXT PRIMARY KEY,
+          agent_id    TEXT NOT NULL REFERENCES agents(id),
+          key_id      TEXT UNIQUE NOT NULL,
+          token_hash  TEXT UNIQUE NOT NULL,
+          status      TEXT NOT NULL DEFAULT 'active',
+          issued_at   TEXT NOT NULL,
+          expires_at  TEXT,
+          revoked_at  TEXT,
+          last_used_at TEXT,
+          created_by  TEXT NOT NULL DEFAULT 'operator'
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_credentials_token_hash ON agent_credentials(token_hash);
+        CREATE INDEX IF NOT EXISTS idx_agent_credentials_agent_id   ON agent_credentials(agent_id);
+      `);
     },
   },
 ];
@@ -806,6 +845,78 @@ export class TaskDB {
     return this.getAgent(id);
   }
 
+  // ─── Agent Credentials CRUD ────────────────────────────────────────────────
+
+  createAgentCredential(input: {
+    agentId: string;
+    keyId: string;
+    tokenHash: string;
+    expiresAt?: string;
+  }): AgentCredential {
+    const now = new Date().toISOString();
+    const credential: AgentCredential = {
+      id: `cred_${randomUUID().slice(0, 12)}`,
+      agentId: input.agentId,
+      keyId: input.keyId,
+      tokenHash: input.tokenHash,
+      status: 'active',
+      issuedAt: now,
+      expiresAt: input.expiresAt,
+      createdBy: 'operator',
+    };
+    this.db.prepare(
+      `INSERT INTO agent_credentials (id, agent_id, key_id, token_hash, status, issued_at, expires_at, created_by) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      credential.id,
+      credential.agentId,
+      credential.keyId,
+      credential.tokenHash,
+      credential.status,
+      credential.issuedAt,
+      credential.expiresAt ?? null,
+      credential.createdBy
+    );
+    return credential;
+  }
+
+  getAgentCredentialByTokenHash(tokenHash: string): AgentCredential | undefined {
+    const row = this.db.prepare(
+      "SELECT * FROM agent_credentials WHERE token_hash = ?"
+    ).get(tokenHash) as any;
+    return row ? this.toAgentCredential(row) : undefined;
+  }
+
+  getAgentCredentialByKeyId(keyId: string): AgentCredential | undefined {
+    const row = this.db.prepare(
+      "SELECT * FROM agent_credentials WHERE key_id = ?"
+    ).get(keyId) as any;
+    return row ? this.toAgentCredential(row) : undefined;
+  }
+
+  listAgentCredentials(agentId: string): AgentCredential[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM agent_credentials WHERE agent_id = ? ORDER BY issued_at DESC"
+    ).all(agentId) as any[];
+    return rows.map(r => this.toAgentCredential(r));
+  }
+
+  revokeAgentCredential(keyId: string): boolean {
+    const now = new Date().toISOString();
+    const result = this.db.prepare(
+      `UPDATE agent_credentials SET status = 'revoked', revoked_at = ? WHERE key_id = ? AND status = 'active'`
+    ).run(now, keyId);
+    return result.changes > 0;
+  }
+
+  updateAgentCredentialLastUsed(tokenHash: string): boolean {
+    const now = new Date().toISOString();
+    const result = this.db.prepare(
+      `UPDATE agent_credentials SET last_used_at = ? WHERE token_hash = ?`
+    ).run(now, tokenHash);
+    return result.changes > 0;
+  }
+
   // ─── Handoff Queue ────────────────────────────────────────────────────
 
   getHandoffQueue(): Task[] {
@@ -977,6 +1088,21 @@ export class TaskDB {
       capabilities: row.capabilities ? JSON.parse(row.capabilities) : undefined,
       rules: row.rules || undefined,
       createdAt: row.created_at,
+    };
+  }
+
+  private toAgentCredential(row: any): AgentCredential {
+    return {
+      id: row.id,
+      agentId: row.agent_id,
+      keyId: row.key_id,
+      tokenHash: row.token_hash,
+      status: row.status,
+      issuedAt: row.issued_at,
+      expiresAt: row.expires_at ?? undefined,
+      revokedAt: row.revoked_at ?? undefined,
+      lastUsedAt: row.last_used_at ?? undefined,
+      createdBy: row.created_by,
     };
   }
 }

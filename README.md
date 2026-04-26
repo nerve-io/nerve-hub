@@ -22,7 +22,36 @@ bun run dev
 
 - **Web UI**：http://localhost:5173
 - **API**：http://localhost:3141
-- **MCP Server**：通过 Claude Desktop 或 MCP 客户端接入
+- **MCP Server**：通过 Claude Desktop 或 MCP 客户端接入（支持本地 stdio 或远端 HTTP/SSE）
+
+---
+
+## 局域网多设备接入
+
+除了本地 `stdio` 方式运行，nerve-hub 还内置了 HTTP/SSE 传输层，允许局域网内的其他设备（如你的另一台电脑上的 IDE）直接连接。
+
+### 远端 Agent 接入方法
+
+1. 确保服务器主机已运行 `bun run dev`。
+2. 在**远端设备**上，运行配置向导：
+   ```bash
+   bun run agent-setup
+   ```
+3. 在提示输入 `nerve-hub 地址` 时，输入类似 `http://192.168.1.x:3141`。
+4. 脚本会自动为你生成如下格式的配置（支持通过 URL 的 query param 注入身份）：
+
+```json
+{
+  "mcpServers": {
+    "nerve-hub": {
+      "transport": "sse",
+      "url": "http://192.168.1.x:3141/api/mcp/sse?agentName=my-agent&agentUid=xxxxxxxx-xxxx-xxxx"
+    }
+  }
+}
+```
+
+> **安全可选**：如果配置了 `NERVE_HUB_TOKEN` 环境变量，远端 MCP 客户端建立连接时需要在 Header 中携带 `Authorization: Bearer <TOKEN>` 才能接入。
 
 ---
 
@@ -46,6 +75,25 @@ bun run dev
 - **已知限制**：
   - MTC Solo 模式无法发现/调用本地自定义 MCP（疑似产品 Bug，与 nerve-hub 无关）
   - 建议在**独立工作目录**执行任务，避免在 nerve-hub 仓库本身内工作（会产生语义混淆）
+
+### Claude Code (CLI)
+
+- **角色**：任务执行方 / 调度方均可
+- **接入方式**：全局 MCP，运行以下命令一次性配置：
+  ```bash
+  claude mcp add nerve-hub -s user \
+    -e NERVE_DB_PATH=/Users/your-name/.nerve/hub.db \
+    -- bun /path/to/nerve-hub/src/mcp.ts
+  ```
+- **能力**：与其他 Agent 相同，通过 MCP 工具收发任务
+- **验证状态**：✅ MCP 接入已验证可用
+- **提升自动化程度**：Claude Code 默认每次工具调用都需手动批准，接入 nerve-hub 后建议在 `~/.claude/settings.json` 中配置权限模式以减少中断：
+  ```json
+  {
+    "permissionMode": "auto"
+  }
+  ```
+  `auto` 模式由内置分类器自动放行安全操作，拦截高危操作（批量删除等），无需逐条确认。若完全信任当前环境，也可设为 `"bypassPermissions"` 跳过所有审批。详见 [Claude Code 权限文档](https://code.claude.com/docs/en/permission-modes)。
 
 ### Google Antigravity
 
