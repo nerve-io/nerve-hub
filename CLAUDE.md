@@ -51,3 +51,14 @@ React + TypeScript + Vite + TailwindCSS v4. Built separately (`npm` not bun — 
 This repo is itself managed through nerve-hub. Agents follow the 6-step lifecycle in `.agent/rules/00-workflow.md`. The `.agent/` directory contains rules, specs, templates, and self-test reports — these are the project's internal coordination layer, not part of the application.
 
 Agent participants: `claude-desktop` (orchestrator), `trae-solo` (primary implementor), `claude-code` (scaffolding/automation), `claude-web` (research/docs), `trae-ide` (interactive coding).
+
+## Knowledge docs
+
+Project knowledge docs live in `docs/` using index+small-file structure. **Never read the full files at root** (`SPARKS.md`, `EXP.md`) — they are redirect stubs.
+
+| Doc type | Entry point | Usage |
+|----------|------------|-------|
+| Product SPARKS | `docs/sparks/INDEX.md` | Read index first, then specific `spark-NNN.md` |
+| Workflow EXP | `docs/exp/INDEX.md` | Read index first, then specific `exp-NNN.md` |
+| New ideas | `docs/sparks/INBOX.md` / `docs/exp/INBOX.md` | Append new entries |
+| Execution reflections | `.agent/ascension/<agent-id>/reflections.md` | Runtime artifacts |

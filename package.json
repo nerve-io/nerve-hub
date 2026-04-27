@@ -12,7 +12,9 @@
     "release": "bash scripts/release.sh",
     "inspect": "npx -y @modelcontextprotocol/inspector bun run src/main.ts mcp",
     "agent-setup": "bun scripts/agent-setup.ts",
-    "daemon": "bun run src/daemon.ts"
+    "daemon": "bun run src/daemon.ts",
+    "cua": "bun run src/cua-agent.ts",
+    "setup:cua": "bash scripts/setup-cua.sh"
   },
   "keywords": [
     "ai",

@@ -3,7 +3,10 @@
  *
  * - POST /webhook: receive task payload, execute with claude CLI
  * - MAX_CONCURRENT=3
- * - Timeout: critical=10min, other=5min, then SIGTERM → 5s → SIGKILL
+ * - Timeout: research=30min, code/test/deploy=15min, critical=10min, other=5min (all env-configurable)
+ *   DAEMON_TIMEOUT_RESEARCH / DAEMON_TIMEOUT_CODE / DAEMON_TIMEOUT_CRITICAL / DAEMON_TIMEOUT_DEFAULT (seconds)
+ *   SIGTERM → DAEMON_TIMEOUT_KILL_WAIT (default 5s) → SIGKILL
+ * - Streams output to .nerve/logs/<taskId>.log (NERVE_LOG_DIR to override)
  * - Reports results directly to shared SQLite DB
  * - Auto-registers as webhook agent and sends heartbeats
  */
@@ -12,6 +15,7 @@ import { TaskDB } from "./db.js";
 import { spawn, spawnSync } from "bun";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { mkdirSync } from "fs";
 import { wakeClaudeDesktop } from "./wake-claude.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -20,8 +24,24 @@ const DB_PATH = process.env.NERVE_DB_PATH || resolve(__dirname, "..", ".nerve", 
 const HUB_URL = process.env.NERVE_PUBLIC_URL || "http://localhost:3141";
 const AGENT_ID = "claude-code";
 const AGENT_NAME = "Claude Code";
-const MAX_CONCURRENT = 3;
-const PROJECT_DIR = "/Users/neilji/AIGC/nerve-hub";
+const MAX_CONCURRENT = parseInt(process.env.DAEMON_MAX_CONCURRENT || "3");
+const PROJECT_DIR = process.env.NERVE_PROJECT_DIR || "/Users/neilji/AIGC/nerve-hub";
+
+// ─── Timeout config (all values in seconds, via env vars) ───────────────────
+// DAEMON_TIMEOUT_RESEARCH  default 1800s (30min) — web search tasks are slow
+// DAEMON_TIMEOUT_CODE      default 1800s (30min) — code/test/deploy tasks
+// DAEMON_TIMEOUT_CRITICAL  default  600s (10min) — any type with critical priority
+// DAEMON_TIMEOUT_DEFAULT   default  300s ( 5min) — custom/review/other
+// DAEMON_TIMEOUT_KILL_WAIT default    5s — grace period between SIGTERM and SIGKILL
+const TIMEOUT_RESEARCH  = parseInt(process.env.DAEMON_TIMEOUT_RESEARCH  || "1800") * 1000;
+const TIMEOUT_CODE      = parseInt(process.env.DAEMON_TIMEOUT_CODE      || "1800") * 1000;
+const TIMEOUT_CRITICAL  = parseInt(process.env.DAEMON_TIMEOUT_CRITICAL  || "600")  * 1000;
+const TIMEOUT_DEFAULT   = parseInt(process.env.DAEMON_TIMEOUT_DEFAULT   || "300")  * 1000;
+const TIMEOUT_KILL_WAIT = parseInt(process.env.DAEMON_TIMEOUT_KILL_WAIT || "5")    * 1000;
+
+// ─── Log directory (stream-json output per task) ─────────────────────────────
+// NERVE_LOG_DIR defaults to .nerve/logs/ next to hub.db
+const LOG_DIR = process.env.NERVE_LOG_DIR || resolve(dirname(DB_PATH), "logs");
 
 // ─── API Key ────────────────────────────────────────────────────────────────
 
@@ -105,6 +125,7 @@ interface WebhookPayload {
   title?: string;
   description?: string;
   priority?: string;
+  type?: string;
   briefing: string;
   callback_url?: string;
   heartbeat_url?: string;
@@ -121,15 +142,23 @@ async function executeTask(task: WebhookPayload): Promise<void> {
     return;
   }
 
-  const timeoutMs = task.priority === "critical" ? 600_000 : 300_000;
-  console.log(`[daemon] executing task ${task.task_id} (timeout=${timeoutMs / 1000}s)`);
+  const timeoutMs =
+    task.type === "research"                          ? TIMEOUT_RESEARCH :
+    task.priority === "critical"                      ? TIMEOUT_CRITICAL :
+    (task.type === "code" || task.type === "test" ||
+     task.type === "deploy")                          ? TIMEOUT_CODE     :
+                                                        TIMEOUT_DEFAULT;
+  // ── Log file: stream-json output written line-by-line during execution ──────
+  mkdirSync(LOG_DIR, { recursive: true });
+  const logPath = resolve(LOG_DIR, `${task.task_id}.log`);
+  console.log(`[daemon] executing task ${task.task_id} (type=${task.type || "custom"}, priority=${task.priority || "medium"}, timeout=${timeoutMs / 1000}s, log=${logPath})`);
 
   const proc = spawn([
     "claude", "-p", task.briefing,
+    "--verbose",
     "--bare",
     "--dangerously-skip-permissions",
-    "--output-format", "json",
-    "--session-id", task.task_id,
+    "--output-format", "stream-json",
     "--add-dir", PROJECT_DIR,
   ], {
     env: {
@@ -148,6 +177,7 @@ async function executeTask(task: WebhookPayload): Promise<void> {
     },
     cwd: PROJECT_DIR,
     stdout: "pipe",
+    stderr: "pipe",
   });
 
   let timedOut = false;
@@ -156,39 +186,96 @@ async function executeTask(task: WebhookPayload): Promise<void> {
     proc.kill("SIGTERM");
     setTimeout(() => {
       if (proc.exitCode === null) proc.kill("SIGKILL");
-    }, 5_000);
+    }, TIMEOUT_KILL_WAIT);
   }, timeoutMs);
+
+  // ── Stream stdout → log file + parse result event ────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let resultEvent: { type: string; is_error?: boolean; result?: string; [key: string]: any } | null = null;
+  const logWriter = Bun.file(logPath).writer();
+
+  // Stream stderr into the same log file (captures errors that would otherwise be lost)
+  (async () => {
+    const reader = proc.stderr.getReader();
+    const decoder = new TextDecoder();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        logWriter.write(decoder.decode(value, { stream: true }));
+      }
+    } finally {
+      logWriter.flush();
+    }
+  })();
+
+  const streamDone = (async () => {
+    const reader = proc.stdout.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        buf += chunk;
+        logWriter.write(chunk);
+        // Parse complete newline-delimited JSON events, extract result
+        let nl: number;
+        while ((nl = buf.indexOf("\n")) !== -1) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line) continue;
+          try {
+            const ev = JSON.parse(line);
+            if (ev.type === "result") resultEvent = ev;
+          } catch { /* non-JSON line */ }
+        }
+      }
+      if (buf.trim()) {
+        logWriter.write(buf);
+        try {
+          const ev = JSON.parse(buf);
+          if (ev.type === "result") resultEvent = ev;
+        } catch {}
+      }
+    } finally {
+      await logWriter.flush();
+      logWriter.end();
+    }
+  })();
 
   const exitCode = await proc.exited;
   clearTimeout(timer);
+  await streamDone; // ensure log is fully flushed before we update DB
 
   if (timedOut) {
     db.update(task.task_id, {
       status: "failed",
-      result: `Task timed out after ${timeoutMs / 1000}s (priority: ${task.priority || "medium"})`,
+      result: `Task timed out after ${timeoutMs / 1000}s (priority: ${task.priority || "medium"}). Full log: ${logPath}`,
     }, AGENT_ID);
-    console.log(`[daemon] task ${task.task_id} timed out`);
+    console.log(`[daemon] task ${task.task_id} timed out — partial log at ${logPath}`);
     return;
   }
 
-  const stdout = await new Response(proc.stdout).text();
-
-  // exit code is unreliable; parse JSON is_error field
+  // Determine success/failure: result event is authoritative, exit code is fallback
   let isError = exitCode !== 0;
-  try {
-    const parsed = JSON.parse(stdout);
-    if (parsed.is_error === true) isError = true;
-    if (parsed.is_error === false) isError = false;
-  } catch {
-    // unparseable output → rely on exit code
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const re = resultEvent as any;
+  if (re !== null) {
+    if (re.is_error === true)  isError = true;
+    if (re.is_error === false) isError = false;
   }
 
+  // Store result event JSON (same shape as --output-format json, fully compatible)
+  const resultCap = task.type === "research" ? 20_000 : 5_000;
+  const rawOutput = resultEvent ? JSON.stringify(resultEvent) : `{"exit_code":${exitCode}}`;
   db.update(task.task_id, {
     status: isError ? "failed" : "done",
-    result: stdout.slice(0, 5000),
+    result: rawOutput.slice(0, resultCap),
   }, AGENT_ID);
 
-  console.log(`[daemon] task ${task.task_id} completed (${isError ? "failed" : "done"})`);
+  console.log(`[daemon] task ${task.task_id} completed (${isError ? "failed" : "done"}) — log: ${logPath}`);
 }
 
 // ─── HTTP server ───────────────────────────────────────────────────────────
@@ -247,6 +334,20 @@ setTimeout(() => registerAgent(), 5_000);
 // Heartbeat every 30s
 setInterval(sendHeartbeat, 30_000);
 sendHeartbeat();
+
+// Recover orphan tasks from previous daemon instance
+function recoverOrphanTasks() {
+  try {
+    const orphans = db.list({ assignee: AGENT_ID, status: "running" });
+    for (const task of orphans) {
+      db.update(task.id, { status: "pending" });
+      console.log(`[daemon] recovered orphan task ${task.id} → pending`);
+    }
+  } catch (err: any) {
+    console.error(`[daemon] orphan recovery error: ${err.message}`);
+  }
+}
+recoverOrphanTasks();
 
 // ─── Shutdown ───────────────────────────────────────────────────────────────
 

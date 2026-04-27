@@ -61,9 +61,11 @@ if (cmd === "start") {
       wakeClaudeDesktop(msg);
     },
   });
+  const inboxPath = process.env.NERVE_INBOX_PATH
+    ?? resolve(__dirname, "..", ".nerve", "inbox");
   const { server, broadcast } = createServer(db, port);
   startRunner(db, broadcast);
-  startInboxWatcher(db, DB_PATH);
+  startInboxWatcher(db, inboxPath);
 
   const shutdown = () => { db.close(); server.stop(); process.exit(0); };
   process.on("SIGINT", shutdown);

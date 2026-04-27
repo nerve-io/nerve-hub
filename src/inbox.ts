@@ -13,12 +13,12 @@
  *   then moves the file to <inbox-dir>/processed/ (success) or <inbox-dir>/failed/ (error).
  *
  * Inbox directory:
- *   Default: <nerve-db-dir>/inbox/   (e.g. .nerve/inbox/)
- *   Override: NERVE_INBOX_PATH env var
+ *   Default: <project-root>/.nerve/inbox/  (set by caller)
+ *   Override: NERVE_INBOX_PATH env var (set by caller)
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from "fs";
-import { join, dirname } from "path";
+import { join } from "path";
 import type { TaskDB } from "./db.js";
 
 const POLL_INTERVAL_MS = 5_000;
@@ -45,9 +45,7 @@ function safeRename(src: string, destDir: string, filename: string) {
   }
 }
 
-export function startInboxWatcher(db: TaskDB, dbPath: string): void {
-  const inboxDir = process.env.NERVE_INBOX_PATH
-    ?? join(dirname(dbPath), "inbox");
+export function startInboxWatcher(db: TaskDB, inboxDir: string): void {
 
   ensureDir(inboxDir);
   const processedDir = join(inboxDir, "processed");

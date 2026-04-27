@@ -56,6 +56,7 @@ async function dispatchPendingWebhookTasks(db: TaskDB, broadcast: BroadcastFn) {
         title: task.title,
         description: task.description,
         priority: task.priority,
+        type: task.type,
         briefing: briefing || "",
         callback_url: PUBLIC_URL + "/webhooks/callback",
         heartbeat_url: PUBLIC_URL + "/webhooks/heartbeat",
