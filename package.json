@@ -27,6 +27,7 @@
   "dependencies": {
     "@clack/prompts": "^1.2.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "puppeteer": "^24.42.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {

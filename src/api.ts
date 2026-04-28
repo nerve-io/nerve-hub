@@ -30,6 +30,7 @@ import type { TaskDB, CreateTaskInput, CreateProjectInput, UpdateTaskInput, Agen
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerMcpTools } from "./mcp.js";
 import { randomUUID, createHash, webcrypto } from "crypto";
+import { existsSync, readFileSync } from "fs";
 const crypto = webcrypto;
 
 // ─── Bun-compatible SSE Transport (classic MCP SSE protocol) ──────────
@@ -558,6 +559,22 @@ export function createServer(db: TaskDB, port = 3141) {
             const resultErr = validateLength(body.result, "task.result");
             if (resultErr) return badRequest(resultErr);
           }
+          if (body.reflection !== undefined) {
+            const reflectionErr = validateLength(body.reflection, "task.reflection");
+            if (reflectionErr) return badRequest(reflectionErr);
+          }
+          if (body.selftestReport !== undefined) {
+            const selftestErr = validateLength(body.selftestReport, "task.selftestReport");
+            if (selftestErr) return badRequest(selftestErr);
+          }
+          if (body.knownIssues !== undefined) {
+            const knownErr = validateLength(body.knownIssues, "task.knownIssues");
+            if (knownErr) return badRequest(knownErr);
+          }
+          if (body.uncoveredScope !== undefined) {
+            const scopeErr = validateLength(body.uncoveredScope, "task.uncoveredScope");
+            if (scopeErr) return badRequest(scopeErr);
+          }
           if (body.dependencies !== undefined && !isValidDependencies(body.dependencies)) {
             return badRequest("dependencies must be an array of strings");
           }
@@ -764,6 +781,25 @@ export function createServer(db: TaskDB, port = 3141) {
           const briefing = db.generateBriefing(briefingMatch[1]);
           if (!briefing) return Response.json({ error: "not found" }, { status: 404 });
           return Response.json({ taskId: briefingMatch[1], briefing });
+        }
+
+        // GET /tasks/:id/log — tail daemon execution log
+        const taskLogMatch = path.match(/^\/tasks\/([^/]+)\/log$/);
+        if (taskLogMatch && req.method === "GET") {
+          const task = db.get(taskLogMatch[1]);
+          if (!task) return Response.json({ error: "not found" }, { status: 404 });
+          const logPath = task.logPath;
+          if (!logPath || !existsSync(logPath)) {
+            return Response.json({ taskId: taskLogMatch[1], lines: [], hint: logPath ? "log file missing" : "no log_path set" });
+          }
+          try {
+            const content = readFileSync(logPath, "utf-8");
+            const allLines = content.split("\n").filter(Boolean);
+            const lines = allLines.slice(-200); // last 200 lines
+            return Response.json({ taskId: taskLogMatch[1], lines, totalLines: allLines.length });
+          } catch {
+            return Response.json({ taskId: taskLogMatch[1], lines: [], hint: "failed to read log" }, { status: 500 });
+          }
         }
 
         // ─── Me Endpoints (require auth) ───────────────────────────────────

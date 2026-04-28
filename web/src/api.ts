@@ -71,6 +71,8 @@ export const getTaskContext = (id: string) =>
   request<TaskContext>(`/tasks/${id}/context`);
 export const getBlockedBy = (id: string) =>
   request<Task[]>(`/tasks/${id}/blocked-by`);
+export const getTaskLog = (id: string) =>
+  request<{ taskId: string; lines: string[]; totalLines?: number; hint?: string }>(`/tasks/${id}/log`);
 
 // ─── Comments ────────────────────────────────────────────────────────────────
 

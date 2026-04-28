@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import MDEditor from '@uiw/react-md-editor';
+import { MarkdownEditor } from '@/components/MarkdownEditor';
 import { statusColor, priorityColor, typeColor } from '../utils';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut';
@@ -344,12 +344,10 @@ export function Kanban({ projectId }: Props) {
                 {formDesc.length}/5000
               </span>
             </div>
-            <MDEditor
-              id="task-desc"
+            <MarkdownEditor
               value={formDesc}
-              onChange={(v) => setFormDesc(v ?? '')}
+              onChange={(v) => setFormDesc(v)}
               height={150}
-              preview="live"
               className="rounded border border-border"
             />
           </div>

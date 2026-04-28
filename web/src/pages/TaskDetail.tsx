@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { getTaskContext, updateTask, deleteTask } from '../api';
+import { getTaskContext, updateTask, deleteTask, getTaskLog, createComment } from '../api';
 import { toast, toastWithUndo } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,6 +21,9 @@ export function TaskDetail({ taskId }: Props) {
   const [loading, setLoading] = useState(true);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejecting, setRejecting] = useState(false);
   const navigate = useNavigate();
 
   const load = useCallback(async () => {
@@ -34,9 +37,26 @@ export function TaskDetail({ taskId }: Props) {
     }
   }, [taskId]);
 
+  const [logLines, setLogLines] = useState<string[] | null>(null);
+
+  const loadLog = useCallback(async () => {
+    try {
+      const data = await getTaskLog(taskId);
+      setLogLines(data.lines);
+    } catch {
+      setLogLines([]);
+    }
+  }, [taskId]);
+
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    loadLog();
+    const timer = setInterval(loadLog, 10_000); // poll every 10s while viewing
+    return () => clearInterval(timer);
+  }, [loadLog]);
 
   useRealtimeSync(ctx?.task?.projectId ?? null, load);
 
@@ -60,7 +80,7 @@ export function TaskDetail({ taskId }: Props) {
     }
   };
 
-  const handleInlineEdit = async (field: 'title' | 'description' | 'result', value: string) => {
+  const handleInlineEdit = async (field: 'title' | 'description' | 'result' | 'reflection' | 'selftestReport' | 'knownIssues' | 'uncoveredScope', value: string) => {
     try {
       await updateTask(taskId, { [field]: value });
       load();
@@ -81,6 +101,23 @@ export function TaskDetail({ taskId }: Props) {
       setDeleting(false);
     }
   };
+
+  const handleReject = async () => {
+  if (!rejectReason.trim()) return;
+  setRejecting(true);
+  try {
+    await createComment(taskId, `[驳回] ${rejectReason.trim()}`);
+    await updateTask(taskId, { status: 'pending' });
+    setRejectOpen(false);
+    setRejectReason('');
+    toast('已驳回，任务状态回退至 pending');
+    load();
+  } catch (err: any) {
+    toast(err.message);
+  } finally {
+    setRejecting(false);
+  }
+};
 
   if (loading) {
     return <div className="max-w-[1100px]">Loading…</div>;
@@ -145,6 +182,11 @@ export function TaskDetail({ taskId }: Props) {
                 → Unblock
               </Button>
             )}
+            {task.status === 'done' && (
+              <Button variant="warning" onClick={() => { setRejectReason(''); setRejectOpen(true); }}>
+                Reject
+              </Button>
+            )}
             <Button variant="destructive" onClick={() => setConfirmOpen(true)}>
               <svg className="w-4 h-4 inline mr-1 -mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>Delete
             </Button>
@@ -165,6 +207,65 @@ export function TaskDetail({ taskId }: Props) {
               />
             </div>
           )}
+
+          <div>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Reflection</h3>
+            <InlineEdit
+              value={task.reflection || ''}
+              onSave={(v) => handleInlineEdit('reflection', v)}
+              className="text-sm text-muted-foreground whitespace-pre-wrap min-h-5"
+              tag="div"
+              placeholder="暂无反思"
+              multiline
+              maxLength={5000}
+              markdown
+            />
+          </div>
+
+          <div>
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">验收材料</h3>
+            <div className="space-y-4">
+              <div>
+                <h4 className="text-xs font-medium text-muted-foreground mb-1.5">自测报告</h4>
+                <InlineEdit
+                  value={task.selftestReport || ''}
+                  onSave={(v) => handleInlineEdit('selftestReport', v)}
+                  className="text-sm text-muted-foreground whitespace-pre-wrap min-h-5"
+                  tag="div"
+                  placeholder="暂无自测报告"
+                  multiline
+                  maxLength={10000}
+                  markdown
+                />
+              </div>
+              <div>
+                <h4 className="text-xs font-medium text-muted-foreground mb-1.5">已知问题</h4>
+                <InlineEdit
+                  value={task.knownIssues || ''}
+                  onSave={(v) => handleInlineEdit('knownIssues', v)}
+                  className="text-sm text-muted-foreground whitespace-pre-wrap min-h-5"
+                  tag="div"
+                  placeholder="暂无已知问题"
+                  multiline
+                  maxLength={5000}
+                  markdown
+                />
+              </div>
+              <div>
+                <h4 className="text-xs font-medium text-muted-foreground mb-1.5">未覆盖范围</h4>
+                <InlineEdit
+                  value={task.uncoveredScope || ''}
+                  onSave={(v) => handleInlineEdit('uncoveredScope', v)}
+                  className="text-sm text-muted-foreground whitespace-pre-wrap min-h-5"
+                  tag="div"
+                  placeholder="暂无未覆盖范围说明"
+                  multiline
+                  maxLength={5000}
+                  markdown
+                />
+              </div>
+            </div>
+          </div>
 
           {blockedBy.length > 0 && (
             <div>
@@ -260,6 +361,23 @@ export function TaskDetail({ taskId }: Props) {
               <CommentSection taskId={taskId} comments={ctx.comments} onUpdated={load} />
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">执行日志</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {logLines === null ? (
+                <p className="text-xs text-muted-foreground animate-pulse">加载中...</p>
+              ) : logLines.length === 0 ? (
+                <p className="text-xs text-muted-foreground">暂无日志</p>
+              ) : (
+                <pre className="text-[11px] leading-relaxed text-muted-foreground max-h-[400px] overflow-auto whitespace-pre-wrap font-mono bg-black/40 rounded-md p-3">
+                  {logLines.slice(-100).join('\n')}
+                </pre>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
 
@@ -275,6 +393,32 @@ export function TaskDetail({ taskId }: Props) {
             <Button variant="ghost" onClick={() => setConfirmOpen(false)}>取消</Button>
             <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
               {deleting ? '删除中...' : '删除'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={rejectOpen} onOpenChange={(v) => !v && !rejecting && setRejectOpen(false)}>
+        <DialogContent className="sm:max-w-[440px] backdrop-blur-xl bg-card/80 border-border/50">
+          <DialogHeader>
+            <DialogTitle>驳回任务</DialogTitle>
+            <DialogDescription>
+              将任务「{task.title}」驳回至 pending 状态。请填写驳回原因（必填）。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-6 pb-2">
+            <textarea
+              className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm resize-vertical min-h-[80px] focus:outline-none focus:border-primary"
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="驳回原因（必填）"
+              autoFocus
+            />
+          </div>
+          <div className="flex justify-end gap-2 px-6 pb-6">
+            <Button variant="ghost" onClick={() => setRejectOpen(false)} disabled={rejecting}>取消</Button>
+            <Button variant="warning" onClick={handleReject} disabled={rejecting || !rejectReason.trim()}>
+              {rejecting ? '驳回中...' : '确认驳回'}
             </Button>
           </div>
         </DialogContent>

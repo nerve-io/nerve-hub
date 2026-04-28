@@ -27,6 +27,12 @@ const AGENT_NAME = "Claude Code";
 const MAX_CONCURRENT = parseInt(process.env.DAEMON_MAX_CONCURRENT || "3");
 const PROJECT_DIR = process.env.NERVE_PROJECT_DIR || "/Users/neilji/AIGC/nerve-hub";
 
+// ─── Logging helper ──────────────────────────────────────────────────────────
+function log(taskId: string | null, msg: string) {
+  const prefix = taskId ? `[daemon] [${taskId.slice(0, 8)}]` : "[daemon]";
+  process.stderr.write(`${prefix} ${msg}\n`);
+}
+
 // ─── Timeout config (all values in seconds, via env vars) ───────────────────
 // DAEMON_TIMEOUT_RESEARCH  default 1800s (30min) — web search tasks are slow
 // DAEMON_TIMEOUT_CODE      default 1800s (30min) — code/test/deploy tasks
@@ -138,7 +144,7 @@ async function executeTask(task: WebhookPayload): Promise<void> {
       status: "failed",
       result: "No API key available (Keychain + DEEPSEEK_API_KEY both empty)",
     }, AGENT_ID);
-    console.log(`[daemon] task ${task.task_id} failed: no API key`);
+    log(task.task_id, "failed: no API key");
     return;
   }
 
@@ -151,7 +157,8 @@ async function executeTask(task: WebhookPayload): Promise<void> {
   // ── Log file: stream-json output written line-by-line during execution ──────
   mkdirSync(LOG_DIR, { recursive: true });
   const logPath = resolve(LOG_DIR, `${task.task_id}.log`);
-  console.log(`[daemon] executing task ${task.task_id} (type=${task.type || "custom"}, priority=${task.priority || "medium"}, timeout=${timeoutMs / 1000}s, log=${logPath})`);
+  db.update(task.task_id, { logPath });
+  log(task.task_id, `started (type=${task.type || "custom"}, priority=${task.priority || "medium"}, timeout=${timeoutMs / 1000}s)`);
 
   const proc = spawn([
     "claude", "-p", task.briefing,
@@ -254,7 +261,7 @@ async function executeTask(task: WebhookPayload): Promise<void> {
       status: "failed",
       result: `Task timed out after ${timeoutMs / 1000}s (priority: ${task.priority || "medium"}). Full log: ${logPath}`,
     }, AGENT_ID);
-    console.log(`[daemon] task ${task.task_id} timed out — partial log at ${logPath}`);
+    log(task.task_id, `timed out after ${timeoutMs / 1000}s`);
     return;
   }
 
@@ -275,7 +282,7 @@ async function executeTask(task: WebhookPayload): Promise<void> {
     result: rawOutput.slice(0, resultCap),
   }, AGENT_ID);
 
-  console.log(`[daemon] task ${task.task_id} completed (${isError ? "failed" : "done"}) — log: ${logPath}`);
+  log(task.task_id, `completed (${isError ? "failed" : "done"})`);
 }
 
 // ─── HTTP server ───────────────────────────────────────────────────────────
@@ -341,7 +348,7 @@ function recoverOrphanTasks() {
     const orphans = db.list({ assignee: AGENT_ID, status: "running" });
     for (const task of orphans) {
       db.update(task.id, { status: "pending" });
-      console.log(`[daemon] recovered orphan task ${task.id} → pending`);
+      log(task.id, "recovered orphan → pending");
     }
   } catch (err: any) {
     console.error(`[daemon] orphan recovery error: ${err.message}`);

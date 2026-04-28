@@ -217,6 +217,10 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       assignee: z.string().optional(),
       dependencies: z.array(z.string()).optional(),
       result: z.string().optional(),
+      reflection: z.string().optional(),
+      selftestReport: z.string().optional(),
+      knownIssues: z.string().optional(),
+      uncoveredScope: z.string().optional(),
     },
     async (args) => {
       const { id, ...updates } = args;
@@ -226,7 +230,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     }
   );
   _toolCount++;
-  _totalDescChars += "Update task fields (title, description, status, priority, type, assignee, dependencies, result)".length;
+  _totalDescChars += "Update task fields (title, description, status, priority, type, assignee, dependencies, result, reflection, selftestReport, knownIssues, uncoveredScope)".length;
 
   server.tool(
     "get_task_context",

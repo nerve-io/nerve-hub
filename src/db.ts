@@ -48,6 +48,11 @@ export interface Task {
   dependencies: string[];
   result: string;
   creator: string;
+  logPath: string | null;
+  reflection: string | null;
+  selftestReport: string | null;
+  knownIssues: string | null;
+  uncoveredScope: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -73,6 +78,11 @@ export interface UpdateTaskInput {
   assignee?: string;
   dependencies?: string[];
   result?: string;
+  logPath?: string | null;
+  reflection?: string | null;
+  selftestReport?: string | null;
+  knownIssues?: string | null;
+  uncoveredScope?: string | null;
 }
 
 export interface ListFilter {
@@ -345,6 +355,29 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 14,
+    name: "add_task_log_path",
+    up(db) {
+      addColumnIfNotExists(db, "tasks", "log_path", "TEXT");
+    },
+  },
+  {
+    version: 15,
+    name: "add_task_reflection",
+    up(db) {
+      addColumnIfNotExists(db, "tasks", "reflection", "TEXT");
+    },
+  },
+  {
+    version: 16,
+    name: "add_task_acceptance_fields",
+    up(db) {
+      addColumnIfNotExists(db, "tasks", "selftest_report", "TEXT");
+      addColumnIfNotExists(db, "tasks", "known_issues", "TEXT");
+      addColumnIfNotExists(db, "tasks", "uncovered_scope", "TEXT");
+    },
+  },
 ];
 
 /** Check if a column exists in a table via PRAGMA table_info. */
@@ -533,13 +566,18 @@ export class TaskDB {
       dependencies: input.dependencies ?? [],
       result: "",
       creator: input.creator ?? '',
+      logPath: null,
+      reflection: null,
+      selftestReport: null,
+      knownIssues: null,
+      uncoveredScope: null,
       createdAt: now,
       updatedAt: now,
     };
     this.db.prepare(
-      `INSERT INTO tasks (id, project_id, title, description, status, priority, type, assignee, dependencies, result, creator, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(task.id, task.projectId, task.title, task.description, task.status, task.priority, task.type, task.assignee, JSON.stringify(task.dependencies), task.result, task.creator, task.createdAt, task.updatedAt);
+      `INSERT INTO tasks (id, project_id, title, description, status, priority, type, assignee, dependencies, result, creator, log_path, reflection, selftest_report, known_issues, uncovered_scope, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(task.id, task.projectId, task.title, task.description, task.status, task.priority, task.type, task.assignee, JSON.stringify(task.dependencies), task.result, task.creator, task.logPath ?? null, task.reflection ?? null, task.selftestReport ?? null, task.knownIssues ?? null, task.uncoveredScope ?? null, task.createdAt, task.updatedAt);
 
     this.logEvent({ projectId: task.projectId, taskId: task.id, actor, action: "task.created", payload: { title: task.title, creator: task.creator } });
 
@@ -602,12 +640,17 @@ export class TaskDB {
       assignee: input.assignee ?? existing.assignee,
       dependencies: input.dependencies ?? existing.dependencies,
       result: input.result ?? existing.result,
+      logPath: input.logPath !== undefined ? input.logPath : existing.logPath,
+      reflection: input.reflection !== undefined ? input.reflection : existing.reflection,
+      selftestReport: input.selftestReport !== undefined ? input.selftestReport : existing.selftestReport,
+      knownIssues: input.knownIssues !== undefined ? input.knownIssues : existing.knownIssues,
+      uncoveredScope: input.uncoveredScope !== undefined ? input.uncoveredScope : existing.uncoveredScope,
       updatedAt: new Date().toISOString(),
     };
 
     this.db.prepare(
-      `UPDATE tasks SET project_id = ?, title = ?, description = ?, status = ?, priority = ?, type = ?, assignee = ?, dependencies = ?, result = ?, updated_at = ? WHERE id = ?`
-    ).run(updated.projectId, updated.title, updated.description, updated.status, updated.priority, updated.type, updated.assignee, JSON.stringify(updated.dependencies), updated.result, updated.updatedAt, updated.id);
+      `UPDATE tasks SET project_id = ?, title = ?, description = ?, status = ?, priority = ?, type = ?, assignee = ?, dependencies = ?, result = ?, log_path = ?, reflection = ?, selftest_report = ?, known_issues = ?, uncovered_scope = ?, updated_at = ? WHERE id = ?`
+    ).run(updated.projectId, updated.title, updated.description, updated.status, updated.priority, updated.type, updated.assignee, JSON.stringify(updated.dependencies), updated.result, updated.logPath, updated.reflection, updated.selftestReport, updated.knownIssues, updated.uncoveredScope, updated.updatedAt, updated.id);
 
     // Log events
     const inputWithoutCreator = { ...input };
@@ -1080,6 +1123,11 @@ export class TaskDB {
       dependencies: JSON.parse(row.dependencies || "[]"),
       result: row.result,
       creator: row.creator ?? '',
+      logPath: row.log_path ?? null,
+      reflection: row.reflection ?? null,
+      selftestReport: row.selftest_report ?? null,
+      knownIssues: row.known_issues ?? null,
+      uncoveredScope: row.uncovered_scope ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

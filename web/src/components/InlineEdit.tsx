@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import MDEditor from '@uiw/react-md-editor';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github.css';
+import { MarkdownEditor } from './MarkdownEditor';
 
 interface InlineEditProps {
   value: string;
@@ -83,12 +83,11 @@ export function InlineEdit({
   if (markdown) {
     return (
       <div>
-        <MDEditor
+        <MarkdownEditor
           value={draft}
-          onChange={(v) => setDraft(v ?? '')}
+          onChange={(v) => setDraft(v)}
           onBlur={save}
           height={200}
-          preview="live"
           className="rounded border border-primary"
         />
         {maxLength !== undefined && (

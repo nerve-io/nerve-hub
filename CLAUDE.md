@@ -58,7 +58,11 @@ Project knowledge docs live in `docs/` using index+small-file structure. **Never
 
 | Doc type | Entry point | Usage |
 |----------|------------|-------|
+| Docs hub | `docs/README.md` | Documentation navigation entry point |
 | Product SPARKS | `docs/sparks/INDEX.md` | Read index first, then specific `spark-NNN.md` |
 | Workflow EXP | `docs/exp/INDEX.md` | Read index first, then specific `exp-NNN.md` |
+| Architecture decisions | `docs/decisions/INDEX.md` | Lightweight ADR for why something was done |
+| Deprecated features | `docs/deprecated/README.md` | Archived features for future recovery |
+| Product roadmap | `docs/roadmap.md` | Current product direction and phase priorities |
 | New ideas | `docs/sparks/INBOX.md` / `docs/exp/INBOX.md` | Append new entries |
 | Execution reflections | `.agent/ascension/<agent-id>/reflections.md` | Runtime artifacts |

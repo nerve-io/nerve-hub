@@ -25,6 +25,10 @@ export interface Task {
   dependencies: string[];
   result: string;
   creator: string;
+  reflection?: string | null;
+  selftestReport?: string | null;
+  knownIssues?: string | null;
+  uncoveredScope?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -97,6 +101,10 @@ export interface UpdateTaskInput {
   assignee?: string;
   dependencies?: string[];
   result?: string;
+  reflection?: string | null;
+  selftestReport?: string | null;
+  knownIssues?: string | null;
+  uncoveredScope?: string | null;
 }
 
 export const ALL_STATUSES: TaskStatus[] = ['pending', 'running', 'blocked', 'done', 'failed'];
