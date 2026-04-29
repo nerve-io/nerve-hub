@@ -12,9 +12,9 @@
 0. whoami（可选）
    → 确认当前 Agent 身份（agentId + name + authMethod）
 
-1. get_my_rules()
-   → 获取你自己的专属行为规则（零参数，自动识别身份）
-   → 需要 MCP 配置中已设置 NERVE_HUB_AGENT_NAME
+1. get_agent_rules()
+   → 获取你自己的专属行为规则（不传 agentId，自动识别身份）
+   → 需要 MCP 配置中已设置 NERVE_HUB_AGENT_NAME 或 NERVE_HUB_TOKEN
 
 2. get_project_rules(projectId: "<项目ID>")
    → 读取项目级规则（技术栈、依赖安装、目录约定等）
@@ -55,7 +55,7 @@
 | `trae-ide` | TRAE / IDE | 交互式编码辅助 |
 | `google-antigravity` | Google / Antigravity | 研究、文档、跨平台协作 |
 
-每个 Agent 通过 `get_my_rules()` 获取自己的专属规则（零参数，自动识别）。也可以调用 `get_agent_rules(agentId)` 读取其他 Agent 的规则。
+每个 Agent 通过 `get_agent_rules()`（不传 agentId）获取自己的专属规则。也可以调用 `get_agent_rules(agentId)` 读取其他 Agent 的规则。
 
 ---
 

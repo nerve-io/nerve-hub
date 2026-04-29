@@ -28,50 +28,45 @@ nerve-hub 是一个 **多产品协同系统**——让不同的 AI 产品（Clau
 
 ---
 
-## 当前阶段：0 → 1 收尾 + 下一阶段准备
+## 当前阶段：0 → 1 收尾（已完成），准备进入阶段 1
+
+> 最后更新：2026-04-29
 
 ### 已稳定（基础设施）
 
 - [x] SQLite 任务存储 + REST API + WebSocket 广播
-- [x] MCP 工具集（23 tools）
+- [x] MCP 工具集（28 tools）
 - [x] Agent 注册、心跳、规则管理
 - [x] Agent 间任务派发与验收流程
 - [x] Web UI（看板、任务详情、事件日志、Agent 状态、Handoff Queue）
 - [x] Inbox 协议（文件方式支持无法访问 localhost 的 Agent）
-- [x] 每 Agent 独立 token + rotation（agent-setup）
+- [x] 每 Agent 独立 token + rotation（`077ac1b1` agent-setup）
 
-### 进行中
+### 已完成：可信 · 可观测 · 可上手
 
-- [ ] `22eb8e99` WebUI 4 项修复（cursor）
-- [ ] `077ac1b1` agent-setup 每 Agent 独立 token + rotation（claude-code）
-- [ ] `7c1978f8` complete_task 硬门禁（claude-code）
+原"下一阶段"三个方向已全部落地：
 
----
+**可信**
+- [x] `7c1978f8` complete_task 硬门禁（三件套 + 反思字段必填）
+- [x] `b4067322` + `71f0296b` Agent 权限分级（spark-036）：后端权限模型 + WebUI 授权管理页
 
-## 下一阶段：可信 · 可观测 · 可上手
+**可观测**
+- [x] `93d67f93` daemon 可观测性 WebUI（spark-028）：Agent 心跳、Runner 状态、错误日志展示
+- [x] `0134b9e3` 安全旁路修复：10 个 MCP 工具权限漏洞修复，任务可见性隔离完整
 
-0→1 的门槛不是功能不够，而是系统还不够可信、可观测、可上手。三个方向并行推进：
+**可上手**
+- [x] `ba5b26a5` 统一配置中心 WebUI（spark-035）：MCP 配置生成器，替代命令行脚本
+- [x] `22eb8e99` WebUI 4 项修复（视觉审查遗留问题）
+- [x] WebUI 全面优化（排版基线、国际化、暗色主题、Kanban 分页、弹窗、菜单重设计等）
 
-### 可信（让 Agent 交付有质量保证）
+### 已完成：并行研究
 
-- complete_task 硬门禁（进行中）
-- **Agent 主动授权 + 权限分级**（spark-036）：Neil 能看到哪个 Agent 请求什么权限，能显式批准/拒绝/撤销。没有这个，自动派单无法安全推进。
+- [x] `8de46fae` R10：LLM 底层架构演进与多 Agent 协作范式（spark-038）
+- [x] `21f3650f` R11：OpenRouter 平台评估（成本模型 + API 供应商可行性）
 
-### 可观测（让系统状态透明）
+### 待决策
 
-- **daemon 可观测性**（spark-028）：Agent 心跳、Runner 状态、错误日志的 WebUI 展示。第二个用户遇到问题，必须能自己排查。
-
-### 可上手（降低接入门槛）
-
-- **统一配置中心**（spark-035）：WebUI 驱动的 Agent 配置，替代命令行 agent-setup 脚本。
-- **竞争窗口与品类定义**（spark-032）：在找第一批用户之前，先想清楚找谁、凭什么。
-
----
-
-## 并行研究
-
-- **R10** LLM 底层架构论文调研（claude-web）：从 MoE、SSM 等架构演进中提炼多 Agent 协作范式，见 spark-038
-- **R11** OpenRouter 平台调研（cursor）：LLM 评级数据 + 成本模型 + API 供应商可行性
+- **竞争窗口与品类定义**（spark-032）：在找第一批用户之前，先想清楚找谁、凭什么。尚无对应任务。
 
 ---
 

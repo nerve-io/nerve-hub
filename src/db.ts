@@ -431,6 +431,23 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 19,
+    name: "add_tool_calls_table",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS tool_calls (
+          id         TEXT PRIMARY KEY,
+          tool_name  TEXT NOT NULL,
+          agent_id   TEXT NOT NULL DEFAULT '',
+          is_error   INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_tool_calls_tool_name ON tool_calls(tool_name);
+        CREATE INDEX IF NOT EXISTS idx_tool_calls_created_at ON tool_calls(created_at);
+      `);
+    },
+  },
 ];
 
 /** Check if a column exists in a table via PRAGMA table_info. */
@@ -450,11 +467,13 @@ function addColumnIfNotExists(db: Database, table: string, column: string, defin
 
 export class TaskDB {
   private db: Database;
+  private dbPath: string;
   /** Absolute path to the file-inbox directory (e.g. .nerve/inbox/). */
   readonly inboxDir: string;
   private _onBatchComplete?: BatchCompleteFn;
 
   constructor(dbPath: string, hooks?: { onBatchComplete?: BatchCompleteFn }) {
+    this.dbPath = dbPath;
     const dir = dirname(dbPath);
     this.inboxDir = process.env.NERVE_INBOX_PATH ?? join(dir, "inbox");
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -1315,6 +1334,164 @@ export class TaskDB {
 
   close(): void {
     this.db.close();
+  }
+
+  // ─── Tool Call Logging ──────────────────────────────────────────────────
+
+  /** Record a tool call. Fire-and-forget — fast single INSERT, no transaction needed. */
+  recordToolCall(toolName: string, agentId: string | null, isError: boolean): void {
+    this.db.prepare(
+      `INSERT INTO tool_calls (id, tool_name, agent_id, is_error, created_at)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run(randomUUID(), toolName, agentId ?? "", isError ? 1 : 0, new Date().toISOString());
+  }
+
+  getToolCallStats(days?: number): {
+    toolName: string;
+    totalCalls: number;
+    errorCalls: number;
+    lastCalledAt: string | null;
+    callerAgents: string[];
+  }[] {
+    const timeFilter = days ? `WHERE created_at >= datetime('now', '-${days} days')` : "";
+    const rows = this.db.prepare(`
+      SELECT
+        tool_name,
+        COUNT(*) as total_calls,
+        SUM(is_error) as error_calls,
+        MAX(created_at) as last_called_at,
+        GROUP_CONCAT(DISTINCT agent_id) as agent_ids
+      FROM tool_calls
+      ${timeFilter}
+      GROUP BY tool_name
+      ORDER BY total_calls DESC
+    `).all() as any[];
+
+    return rows.map(r => ({
+      toolName: r.tool_name,
+      totalCalls: r.total_calls,
+      errorCalls: r.error_calls || 0,
+      lastCalledAt: r.last_called_at,
+      callerAgents: r.agent_ids ? r.agent_ids.split(",").filter(Boolean) : [],
+    }));
+  }
+
+  // ─── Data Export / Import / Backup ──────────────────────────────────────
+
+  /** Full export: all tables as JSON with schema version. */
+  exportData(): string {
+    const version = this.getCurrentMigrationVersion();
+    const projects = this.db.prepare("SELECT * FROM projects").all();
+    const tasks = this.db.prepare("SELECT * FROM tasks").all();
+    const events = this.db.prepare("SELECT * FROM events").all();
+    const comments = this.db.prepare("SELECT * FROM comments").all();
+    const agents = this.db.prepare("SELECT * FROM agents").all();
+    const credentials = this.db.prepare("SELECT id, agent_id, key_id, token_hash, status, issued_at, expires_at, revoked_at, last_used_at, created_by FROM agent_credentials").all();
+    const toolCalls = this.db.prepare("SELECT * FROM tool_calls").all();
+
+    return JSON.stringify({
+      exportedAt: new Date().toISOString(),
+      schemaVersion: version,
+      tables: { projects, tasks, events, comments, agents, agent_credentials: credentials, tool_calls: toolCalls },
+    }, null, 2);
+  }
+
+  /** Import from JSON export. Uses a single transaction — rollback on any error. */
+  importData(json: string): { ok: boolean; error?: string; counts?: Record<string, number> } {
+    let data: any;
+    try {
+      data = JSON.parse(json);
+    } catch {
+      return { ok: false, error: "Invalid JSON" };
+    }
+
+    if (!data.tables) {
+      return { ok: false, error: "Not a valid export file: missing 'tables' key" };
+    }
+
+    const currentVersion = this.getCurrentMigrationVersion();
+    if (data.schemaVersion && data.schemaVersion > currentVersion) {
+      return { ok: false, error: `Export schema version (v${data.schemaVersion}) is newer than current DB (v${currentVersion}). Upgrade nerve-hub first.` };
+    }
+
+    const tables = data.tables;
+    // Validate expected tables exist
+    const expected = ["projects", "tasks", "events", "comments", "agents", "agent_credentials"];
+    for (const t of expected) {
+      if (!Array.isArray(tables[t])) {
+        return { ok: false, error: `Missing or invalid table: ${t}` };
+      }
+    }
+
+    // Insert helper
+    const insert = (table: string, columns: string[], rows: any[]) => {
+      if (rows.length === 0) return 0;
+      const placeholders = columns.map(() => "?").join(",");
+      const quotedCols = columns.join(",");
+      const stmt = this.db.prepare(`INSERT OR REPLACE INTO ${table} (${quotedCols}) VALUES (${placeholders})`);
+      for (const row of rows) {
+        const vals = columns.map(c => row[c] ?? null);
+        stmt.run(...vals);
+      }
+      return rows.length;
+    };
+
+    const tx = this.db.transaction(() => {
+      const counts: Record<string, number> = {};
+
+      // Clear existing data (reverse dependency order)
+      this.db.exec("DELETE FROM tool_calls");
+      this.db.exec("DELETE FROM agent_credentials");
+      this.db.exec("DELETE FROM events");
+      this.db.exec("DELETE FROM comments");
+      this.db.exec("DELETE FROM tasks");
+      this.db.exec("DELETE FROM projects");
+      // Keep agents table (registered agents), insert-or-replace
+      this.db.exec("DELETE FROM agents");
+      // migrations table is preserved (not cleared)
+
+      // Insert in dependency order
+      counts.projects = insert("projects",
+        ["id", "name", "description", "rules", "created_at", "updated_at"], tables.projects);
+      counts.tasks = insert("tasks",
+        ["id", "title", "description", "status", "result", "created_at", "updated_at",
+         "assignee", "priority", "type", "project_id", "dependencies", "creator",
+         "log_path", "reflection", "selftest_report", "known_issues", "uncovered_scope"], tables.tasks);
+      counts.events = insert("events",
+        ["id", "project_id", "task_id", "actor", "action", "payload", "created_at"], tables.events);
+      counts.comments = insert("comments",
+        ["id", "task_id", "project_id", "actor", "body", "created_at"], tables.comments);
+      counts.agents = insert("agents",
+        ["id", "name", "type", "endpoint", "heartbeat_interval", "last_seen", "status",
+         "metadata", "capabilities", "permission_level", "visibility_scope", "rules", "created_at"], tables.agents);
+      counts.agent_credentials = insert("agent_credentials",
+        ["id", "agent_id", "key_id", "token_hash", "status", "issued_at",
+         "expires_at", "revoked_at", "last_used_at", "created_by"], tables.agent_credentials);
+      if (tables.tool_calls) {
+        counts.tool_calls = insert("tool_calls",
+          ["id", "tool_name", "agent_id", "is_error", "created_at"], tables.tool_calls);
+      }
+
+      return counts;
+    });
+
+    try {
+      const counts = tx();
+      return { ok: true, counts: counts as any };
+    } catch (err: any) {
+      return { ok: false, error: `Import failed: ${err.message}` };
+    }
+  }
+
+  /** Create a timestamped SQLite backup file via VACUUM INTO. Returns the backup path. */
+  backup(targetDir?: string): string {
+    const dir = targetDir || dirname(this.dbPath);
+    const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const backupPath = join(dir, `hub-backup-${ts}.db`);
+    mkdirSync(dir, { recursive: true });
+    // VACUUM INTO creates a clean, standalone copy of the database
+    this.db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
+    return backupPath;
   }
 
   // ─── Row mappers ───────────────────────────────────────────────────────

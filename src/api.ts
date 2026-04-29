@@ -24,6 +24,9 @@
  *
  * Events:
  *   GET    /events            — list events (?projectId=&taskId=&limit=)
+ *
+ * Stats:
+ *   GET    /tool-stats        — tool call frequency stats (?days=)
  */
 
 import type { TaskDB, CreateTaskInput, CreateProjectInput, UpdateTaskInput, AgentType, AgentStatus, AgentCredential } from "./db.js";
@@ -387,6 +390,63 @@ export function createServer(db: TaskDB, port = 3141) {
           return new Response(JSON.stringify(events), {
             headers: { "Content-Type": "application/json", "X-Total-Count": String(total) },
           });
+        }
+
+        // ─── GET /tool-stats ────────────────────────────────────────────
+        if (path === "/tool-stats" && req.method === "GET") {
+          const daysParam = url.searchParams.get("days");
+          const days = daysParam ? parseInt(daysParam, 10) : undefined;
+          if (daysParam && (isNaN(days!) || days! < 1)) {
+            return badRequest("days must be a positive integer");
+          }
+          const stats = db.getToolCallStats(days);
+          return new Response(JSON.stringify(stats), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        // ─── POST /export ──────────────────────────────────────────────
+        if (path === "/export" && req.method === "POST") {
+          const json = db.exportData();
+          return new Response(json, {
+            headers: {
+              "Content-Type": "application/json",
+              "Content-Disposition": "attachment; filename=nerve-hub-export.json",
+            },
+          });
+        }
+
+        // ─── POST /import ──────────────────────────────────────────────
+        if (path === "/import" && req.method === "POST") {
+          const authCtx = (req as RequestWithAuth).auth;
+          if (!authCtx) return unauthorized();
+          const agent = db.getAgent(authCtx.agentId);
+          const permError = db.checkPermissionLevel(agent, 'admin');
+          if (permError) return forbidden(permError);
+
+          const body = await json(req);
+          if (body === null) return badRequest("invalid JSON");
+          if (body.confirm !== "yes-i-know-this-replaces-all-data") {
+            return badRequest("confirm must be 'yes-i-know-this-replaces-all-data'");
+          }
+          const result = db.importData(JSON.stringify(body.data ?? body));
+          if (!result.ok) return badRequest(result.error!);
+          broadcast({ type: "data.imported" });
+          return Response.json(result.counts);
+        }
+
+        // ─── POST /backup ──────────────────────────────────────────────
+        if (path === "/backup" && req.method === "POST") {
+          const authCtx = (req as RequestWithAuth).auth;
+          if (!authCtx) return unauthorized();
+          const agent = db.getAgent(authCtx.agentId);
+          const permError = db.checkPermissionLevel(agent, 'admin');
+          if (permError) return forbidden(permError);
+
+          const body = await json(req).catch(() => ({}));
+          const backupPath = db.backup(body?.targetDir);
+          broadcast({ type: "backup.created", path: backupPath });
+          return Response.json({ path: backupPath });
         }
 
         // ─── POST /projects ─────────────────────────────────────────────

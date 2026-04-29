@@ -177,6 +177,21 @@ export const patchAgentPermissions = (
     body: JSON.stringify(body),
   });
 
+// ─── Tool Stats ──────────────────────────────────────────────────────────────
+
+export interface ToolCallStat {
+  toolName: string;
+  totalCalls: number;
+  errorCalls: number;
+  lastCalledAt: string | null;
+  callerAgents: string[];
+}
+
+export const getToolStats = (days?: number) => {
+  const qs = days ? `?days=${days}` : '';
+  return request<ToolCallStat[]>(`/tool-stats${qs}`);
+};
+
 /** Issue credential (localhost / operator only — matches POST /api/agents/:id/credentials) */
 export interface IssueCredentialResponse {
   kid: string;
@@ -197,3 +212,20 @@ export const getHandoffQueue = (params?: Record<string, string>) => {
   return request<any[]>(`/handoff${qs}`);
 };
 export const getTaskBriefing = (taskId: string) => request<{ taskId: string; briefing: string }>(`/tasks/${taskId}/briefing`);
+
+// ─── Data Migration ──────────────────────────────────────────────────────────
+
+export const exportData = () =>
+  request<any>('/export', { method: 'POST' });
+
+export const importData = (data: any, confirm: string) =>
+  request<any>('/import', {
+    method: 'POST',
+    body: JSON.stringify({ data, confirm }),
+  });
+
+export const createBackup = (targetDir?: string) =>
+  request<{ path: string }>('/backup', {
+    method: 'POST',
+    body: JSON.stringify({ targetDir }),
+  });

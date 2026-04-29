@@ -11,7 +11,7 @@ const rules = `# Cursor — Agent 规则
 
 > Agent ID：\`cursor\`
 > 产品线：Cursor IDE（有内置浏览器预览，视觉判断能力强）
-> 读取方式：\`get_my_rules()\`
+> 读取方式：\`get_agent_rules()\`
 
 ---
 
@@ -21,7 +21,7 @@ Cursor 在本项目中的职责是：**UI 实现 → WebUI 自测 → UI 验收*
 
 **你的 Agent ID 是 \`cursor\`，不是 claude-code，不是 trae-solo。**
 
-每次对话开始请先调用 \`get_my_rules()\` 确认自己的身份，再用 \`list_tasks(assignee: "cursor")\` 查看待办任务。
+每次对话开始请先调用 \`get_agent_rules()\` 确认自己的身份，再用 \`list_tasks(assignee: "cursor")\` 查看待办任务。
 
 ---
 
@@ -40,7 +40,7 @@ Cursor 在本项目中的职责是：**UI 实现 → WebUI 自测 → UI 验收*
 ## 三、启动协议
 
 每次对话开始必须执行：
-1. \`get_my_rules()\` — 获取本规则（即本文件）
+1. \`get_agent_rules()\` — 获取本规则（即本文件）
 2. 确认 Agent ID 是 \`cursor\`
 3. \`list_tasks(assignee: "cursor", status: "pending")\` — 查看待办
 
