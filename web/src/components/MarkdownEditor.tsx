@@ -58,7 +58,7 @@ export function MarkdownEditor({
     },
     editorProps: {
       attributes: {
-        class: 'prose prose-sm max-w-none focus:outline-none',
+        class: 'prose max-w-none focus:outline-none',
       },
     },
   });
@@ -88,7 +88,7 @@ export function MarkdownEditor({
       style={{ height, minHeight: height }}
     >
       <style>{`
-        .ProseMirror { min-height: ${height}px; padding: 0.5rem 0.75rem; outline: none; }
+        .ProseMirror { min-height: ${height}px; padding: 0.875rem 1rem; outline: none; font-size: 0.95rem; line-height: 1.7; }
         .ProseMirror p.is-editor-empty:first-child::before {
           color: var(--color-muted-foreground, #a1a1aa);
           content: attr(data-placeholder);
@@ -107,7 +107,7 @@ export function MarkdownEditor({
         .ProseMirror pre code { background: none; padding: 0; }
         .ProseMirror blockquote { border-left: 3px solid var(--color-border, #333); padding-left: 0.75rem; opacity: 0.8; }
         .ProseMirror hr { border: none; border-top: 1px solid var(--color-border, #333); margin: 1rem 0; }
-        .ProseMirror p { margin: 0.25rem 0; }
+        .ProseMirror p { margin: 0.45rem 0; }
       `}</style>
       <EditorContent editor={editor} />
     </div>

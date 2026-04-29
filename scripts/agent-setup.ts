@@ -3,7 +3,6 @@
  *
  * Usage:
  *   bun run agent-setup                    # Interactive setup for multiple products
- *   bun run agent-setup --agent <agentId>  # Quick setup for a specific agent
  *
  * Guides the user through:
  *   1. Scan for known AI products (Claude Desktop, Antigravity, TRAE SOLO, etc.)
@@ -15,32 +14,12 @@
  */
 
 import * as p from "@clack/prompts";
-import { randomUUID, createHash, webcrypto } from "crypto";
+import { createHash, webcrypto } from "crypto";
 import { readFileSync, writeFileSync, existsSync, statSync, mkdirSync, chmodSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
 const crypto = webcrypto;
-
-// ─── Command Line Args ───────────────────────────────────────────────────────
-
-interface Args {
-  agent?: string;
-}
-
-function parseArgs(): Args {
-  const args: Args = {};
-  const argv = process.argv.slice(2);
-  
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--agent" && i + 1 < argv.length) {
-      args.agent = argv[i + 1];
-      i++;
-    }
-  }
-  
-  return args;
-}
 
 // ─── Credentials File Helpers ────────────────────────────────────────────────
 
@@ -103,18 +82,51 @@ function writeCredentialsFile(agentId: string, token: string, keyId: string, iss
 
 // ─── Token Generation ────────────────────────────────────────────────────────
 
+async function revokeAllTokens(agentId: string): Promise<void> {
+  try {
+    // List existing credentials
+    const listRes = await fetch(`http://localhost:3141/api/agents/${agentId}/credentials`);
+    if (!listRes.ok) return; // agent may not exist yet
+    const creds = await listRes.json() as Array<{ kid: string; revoked_at: string | null }>;
+    const activeCreds = creds.filter(c => !c.revoked_at);
+    for (const cred of activeCreds) {
+      await fetch(`http://localhost:3141/api/agents/${agentId}/credentials/${cred.kid}`, { method: 'DELETE' });
+    }
+  } catch {
+    // best-effort
+  }
+}
+
+async function registerAgentIfNeeded(agentId: string, displayName: string): Promise<void> {
+  try {
+    const checkRes = await fetch(`http://localhost:3141/api/agents/${agentId}`);
+    if (checkRes.ok) return;
+  } catch {}
+  // Auto-register
+  await fetch('http://localhost:3141/api/agents', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id: agentId,
+      name: displayName,
+      type: 'manual',
+    }),
+  });
+}
+
 async function issueTokenFromServer(agentId: string): Promise<{ token: string; keyId: string; issuedAt: string; expiresAt?: string }> {
+  // Revoke old tokens first (rotation mode)
+  await revokeAllTokens(agentId);
+
   const response = await fetch('http://localhost:3141/api/agents/' + agentId + '/credentials', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    }
+    headers: { 'Content-Type': 'application/json' }
   });
-  
+
   if (!response.ok) {
     throw new Error(`Failed to issue token: ${response.status} ${await response.text()}`);
   }
-  
+
   const result = await response.json();
   return {
     token: result.token,
@@ -143,7 +155,6 @@ interface ProductSelection {
   detected: boolean;
   configPath: string | null;    // resolved config file path (auto only)
   displayName: string;
-  uid: string;
 }
 
 // ─── Known Products Table ───────────────────────────────────────────────────
@@ -196,10 +207,6 @@ const KNOWN_PRODUCTS: ProductDef[] = [
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function generateUID(): string {
-  return randomUUID();
-}
-
 function detectProduct(product: ProductDef): { detected: boolean; configPath: string | null } {
   for (const rawPath of product.configPaths) {
     try {
@@ -231,11 +238,11 @@ function writeJSON(path: string, data: unknown): void {
   writeFileSync(path, JSON.stringify(data, null, 2) + "\n", "utf-8");
 }
 
-/** Check if a config file already has NERVE_HUB_AGENT_UID injected for the given serverKey */
-function hasExistingUID(configPath: string, serverKey: string): boolean {
+/** Check if a config file already has NERVE_HUB_AGENT_NAME injected for the given serverKey */
+function hasExistingAgent(configPath: string, serverKey: string): boolean {
   try {
     const cfg = readJSON(configPath);
-    return !!(cfg.mcpServers?.[serverKey]?.env?.NERVE_HUB_AGENT_UID);
+    return !!(cfg.mcpServers?.[serverKey]?.env?.NERVE_HUB_AGENT_NAME);
   } catch {
     return false;
   }
@@ -245,65 +252,7 @@ function hasExistingUID(configPath: string, serverKey: string): boolean {
 
 async function main() {
   p.intro("nerve-hub agent setup");
-
-  const args = parseArgs();
-  
-  // Quick setup for specific agent
-  if (args.agent) {
-    await quickSetup(args.agent);
-    return;
-  }
-
-  // Interactive setup for multiple products
   await interactiveSetup();
-}
-
-async function quickSetup(agentId: string) {
-  p.intro(`nerve-hub agent setup for ${agentId}`);
-
-  // Issue token from server
-  let tokenInfo;
-  try {
-    tokenInfo = await issueTokenFromServer(agentId);
-  } catch (error) {
-    p.cancel(`Failed to issue token: ${error}`);
-    process.exit(1);
-  }
-  
-  // Write credentials file
-  writeCredentialsFile(agentId, tokenInfo.token, tokenInfo.keyId, tokenInfo.issuedAt, tokenInfo.expiresAt);
-  
-  // Update MCP configs for detected products
-  const scanResults = KNOWN_PRODUCTS.map((product) => {
-    const { detected, configPath } = detectProduct(product);
-    return { product, detected, configPath };
-  });
-  
-  const autoDone: string[] = [];
-  
-  for (const info of scanResults) {
-    if (info.detected && info.configPath && info.product.mcpServerKey) {
-      const sel: ProductSelection = {
-        product: info.product,
-        detected: info.detected,
-        configPath: info.configPath,
-        displayName: agentId,
-        uid: agentId, // Use agentId as UID for consistency
-      };
-      
-      // Inject with token
-      injectAutoWithToken(sel, tokenInfo.token);
-      autoDone.push(info.product.label);
-    }
-  }
-  
-  // Summary
-  let summary = "";
-  if (autoDone.length > 0) summary += `  自动注入：${autoDone.join(", ")}\n`;
-  summary += `\n  请重启已配置的产品以使配置生效。`;
-  
-  p.outro(summary);
-  process.exit(0);
 }
 
 async function interactiveSetup() {
@@ -382,12 +331,11 @@ async function interactiveSetup() {
         detected: false,
         configPath: null,
         displayName: (name as string) || "my-agent",
-        uid: generateUID(),
       });
     } else {
       const info = scanResults[idx];
       const existingInfo = info.detected && info.configPath && info.product.mcpServerKey
-        ? hasExistingUID(info.configPath, info.product.mcpServerKey)
+        ? hasExistingAgent(info.configPath, info.product.mcpServerKey)
         : false;
 
       if (existingInfo) {
@@ -418,7 +366,6 @@ async function interactiveSetup() {
         detected: info.detected,
         configPath: info.configPath,
         displayName: (name as string) || info.product.defaultName,
-        uid: generateUID(),
       });
     }
   }
@@ -441,32 +388,32 @@ async function interactiveSetup() {
   }
   const serverAddress = (serverAddressPrompt as string).trim();
 
-  // ── Step 3: Generate token and write credentials ─────────────────────────
-  
-  // Use first selection's displayName as agentId for credentials
-  const agentId = selections[0].displayName;
-  
-  // Issue token from server
-  let tokenInfo;
-  try {
-    tokenInfo = await issueTokenFromServer(agentId);
-  } catch (error) {
-    p.cancel(`Failed to issue token: ${error}`);
-    process.exit(1);
-  }
-  
-  // Write credentials file
-  writeCredentialsFile(agentId, tokenInfo.token, tokenInfo.keyId, tokenInfo.issuedAt, tokenInfo.expiresAt);
-
-  // ── Step 4: Execute injection per product ───────────────────────────────
+  // ── Step 3: Per-product token issuance and injection ──────────────────────
 
   const autoDone: string[] = [];
   const manualDone: string[] = [];
   const templateDone: string[] = [];
 
   for (const sel of selections) {
+    const agentId = sel.displayName;
+
+    // Auto-register if agent doesn't exist yet
+    await registerAgentIfNeeded(agentId, sel.displayName);
+
+    // Issue per-agent token (revokes old tokens first)
+    let tokenInfo;
+    try {
+      tokenInfo = await issueTokenFromServer(agentId);
+    } catch (error) {
+      p.note(`Failed to issue token for ${agentId}: ${error}`, `✗ ${sel.product.label}`);
+      continue;
+    }
+
+    // Write credentials for this agent
+    writeCredentialsFile(agentId, tokenInfo.token, tokenInfo.keyId, tokenInfo.issuedAt, tokenInfo.expiresAt);
+
+    // Inject into config
     if (sel.product.id === "custom") {
-      // "Other product" — show template, allow UID regeneration
       await showOtherProductTemplateWithToken(sel, serverAddress, tokenInfo.token);
       templateDone.push(sel.displayName);
     } else if (sel.product.injectMode === "auto" && sel.configPath) {
@@ -506,13 +453,12 @@ function injectAuto(sel: ProductSelection, serverAddress: string): void {
     }
     const url = new URL(urlStr);
     url.searchParams.set("agentName", sel.displayName);
-    url.searchParams.set("agentUid", sel.uid);
 
     cfg.mcpServers[sel.product.mcpServerKey!] = {
       transport: "sse",
       url: url.toString()
     };
-    
+
     writeJSON(sel.configPath!, cfg);
 
     p.note(
@@ -526,14 +472,13 @@ function injectAuto(sel: ProductSelection, serverAddress: string): void {
       env: {
         NERVE_DB_PATH: DEFAULT_DB_PATH,
         NERVE_HUB_AGENT_NAME: sel.displayName,
-        NERVE_HUB_AGENT_UID: sel.uid,
       }
     };
-    
+
     writeJSON(sel.configPath!, cfg);
 
     p.note(
-      `  注入 command=${DEFAULT_BIN_PATH}\n  注入 args=["mcp"]\n  注入 NERVE_DB_PATH=${DEFAULT_DB_PATH}\n  注入 NERVE_HUB_AGENT_NAME=${sel.displayName}\n  注入 NERVE_HUB_AGENT_UID=${sel.uid}\n  配置文件已更新：${sel.configPath!.replace(homedir(), "~")}`,
+      `  注入 command=${DEFAULT_BIN_PATH}\n  注入 args=["mcp"]\n  注入 NERVE_DB_PATH=${DEFAULT_DB_PATH}\n  注入 NERVE_HUB_AGENT_NAME=${sel.displayName}\n  配置文件已更新：${sel.configPath!.replace(homedir(), "~")}`,
       `✓ ${sel.product.label}`
     );
   }
@@ -549,7 +494,6 @@ function injectAutoWithToken(sel: ProductSelection, token: string): void {
     env: {
       NERVE_DB_PATH: DEFAULT_DB_PATH,
       NERVE_HUB_AGENT_NAME: sel.displayName,
-      NERVE_HUB_AGENT_UID: sel.uid,
       NERVE_HUB_TOKEN: token,
     }
   };
@@ -557,7 +501,7 @@ function injectAutoWithToken(sel: ProductSelection, token: string): void {
   writeJSON(sel.configPath!, cfg);
 
   p.note(
-    `  注入 command=${DEFAULT_BIN_PATH}\n  注入 args=["mcp"]\n  注入 NERVE_DB_PATH=${DEFAULT_DB_PATH}\n  注入 NERVE_HUB_AGENT_NAME=${sel.displayName}\n  注入 NERVE_HUB_AGENT_UID=${sel.uid}\n  注入 NERVE_HUB_TOKEN=<token>\n  配置文件已更新：${sel.configPath!.replace(homedir(), "~")}`,
+    `  注入 command=${DEFAULT_BIN_PATH}\n  注入 args=["mcp"]\n  注入 NERVE_DB_PATH=${DEFAULT_DB_PATH}\n  注入 NERVE_HUB_AGENT_NAME=${sel.displayName}\n  注入 NERVE_HUB_TOKEN=<token>\n  配置文件已更新：${sel.configPath!.replace(homedir(), "~")}`,
     `✓ ${sel.product.label}`
   );
 }
@@ -573,7 +517,6 @@ function buildMCPConfigJSON(sel: ProductSelection, command: string, args: string
     }
     const url = new URL(urlStr);
     url.searchParams.set("agentName", sel.displayName);
-    url.searchParams.set("agentUid", sel.uid);
 
     return JSON.stringify(
       {
@@ -592,7 +535,6 @@ function buildMCPConfigJSON(sel: ProductSelection, command: string, args: string
   const env: any = {
     NERVE_DB_PATH: DEFAULT_DB_PATH,
     NERVE_HUB_AGENT_NAME: sel.displayName,
-    NERVE_HUB_AGENT_UID: sel.uid,
   };
   
   if (token) {
@@ -643,55 +585,15 @@ async function showManualInstructionsWithToken(sel: ProductSelection, serverAddr
 }
 
 async function showOtherProductTemplate(sel: ProductSelection, serverAddress: string): Promise<void> {
-  let uid = sel.uid;
-
-  while (true) {
-    const selWithUID = { ...sel, uid };
-    const json = buildMCPConfigJSON(selWithUID, "/path/to/nerve-hub", ["mcp"], serverAddress);
-
-    console.log(`\n${json}\n`);
-
-    const action = await p.select({
-      message: "选择操作：",
-      options: [
-        { value: "done", label: "完成，继续", hint: "保存当前 UID" },
-        { value: "regenerate", label: "重新生成 UID" },
-      ],
-    });
-
-    if (p.isCancel(action) || action === "done") {
-      sel.uid = uid;
-      break;
-    }
-
-    uid = generateUID();
-  }
+  const json = buildMCPConfigJSON(sel, "/path/to/nerve-hub", ["mcp"], serverAddress);
+  console.log(`\n${json}\n`);
+  await p.confirm({ message: "请将以上配置复制到对应产品的 MCP 设置中。完成后按回车继续" });
 }
 
 async function showOtherProductTemplateWithToken(sel: ProductSelection, serverAddress: string, token: string): Promise<void> {
-  let uid = sel.uid;
-
-  while (true) {
-    const selWithUID = { ...sel, uid };
-    const json = buildMCPConfigJSON(selWithUID, "/path/to/nerve-hub", ["mcp"], serverAddress, token);
-
-    console.log(`\n${json}\n`);
-
-    const action = await p.select({
-      message: "选择操作：",
-      options: [
-        { value: "done", label: "完成，继续", hint: "保存当前 UID" },
-        { value: "regenerate", label: "重新生成 UID" },
-      ],
-    });
-
-    if (p.isCancel(action) || action === "done") {
-      sel.uid = uid;
-      break;
-    }
-
-    uid = generateUID();
-  }
+  const json = buildMCPConfigJSON(sel, "/path/to/nerve-hub", ["mcp"], serverAddress, token);
+  console.log(`\n${json}\n`);
+  await p.confirm({ message: "请将以上配置复制到对应产品的 MCP 设置中。完成后按回车继续" });
 }
 
 main().catch((err) => {

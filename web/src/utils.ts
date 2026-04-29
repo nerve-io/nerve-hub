@@ -1,3 +1,5 @@
+import i18n from './i18n';
+
 export function relativeTime(dateStr: string): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
@@ -7,10 +9,10 @@ export function relativeTime(dateStr: string): string {
   const hours = Math.floor(minutes / 60);
   const days = Math.floor(hours / 24);
 
-  if (seconds < 60) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 30) return `${days}d ago`;
+  if (seconds < 60) return i18n.t('time.justNow');
+  if (minutes < 60) return i18n.t('time.minutesAgo', { count: minutes });
+  if (hours < 24) return i18n.t('time.hoursAgo', { count: hours });
+  if (days < 30) return i18n.t('time.daysAgo', { count: days });
   return new Date(dateStr).toLocaleDateString();
 }
 
@@ -27,6 +29,20 @@ export function statusColor(status: string): string {
     failed: 'hsl(var(--status-failed))',
   };
   return map[status] || 'hsl(var(--muted-foreground))';
+}
+
+/** Kanban / compact UI：任务状态短标签（随当前语言） */
+export function taskStatusLabel(status: string): string {
+  return i18n.t(`taskStatus.${status}`, { defaultValue: status });
+}
+
+/** 基于 API `lastSeen`（心跳时间）：≤60s 视为在线侧新鲜心跳 */
+export function isHeartbeatFresh(lastSeen: string | undefined, windowMs = 60_000): boolean | null {
+  const s = lastSeen?.trim();
+  if (!s) return null;
+  const ts = new Date(s).getTime();
+  if (Number.isNaN(ts)) return null;
+  return Date.now() - ts <= windowMs;
 }
 
 export function priorityColor(priority: string): string {
@@ -51,38 +67,73 @@ export function typeColor(type: string): string {
   return map[type] || 'hsl(var(--muted-foreground))';
 }
 
+export function taskPriorityLabel(priority: string): string {
+  return i18n.t(`taskPriority.${priority}`, { defaultValue: priority });
+}
+
+export function taskTypeLabel(type: string): string {
+  return i18n.t(`taskType.${type}`, { defaultValue: type });
+}
+
+export function agentStatusLabel(status: string): string {
+  return i18n.t(`agentStatus.${status}`, { defaultValue: status });
+}
+
+export function agentTypeLabel(type: string): string {
+  return i18n.t(`agentType.${type}`, { defaultValue: type });
+}
+
 export function formatAction(action: string, payload: string): string {
+  const deletedTitle = () => i18n.t('events.deletedTask');
   try {
     const p = JSON.parse(payload);
-    
+
     switch (action) {
       case 'task.created':
-        return `创建了任务《${p.title || '未知任务'}》`;
+        return i18n.t('events.taskCreated', { title: p.title || deletedTitle() });
       case 'task.claimed':
-        return `领取了任务《${p.title || '未知任务'}》`;
-      case 'task.completed':
-        const duration = p.duration ? `，耗时 ${Math.round(p.duration / 60)} 分钟` : '';
-        return `完成了任务《${p.title || '未知任务'}》${duration}`;
+        return i18n.t('events.taskClaimed', { title: p.title || deletedTitle() });
+      case 'task.completed': {
+        const extra = p.duration
+          ? i18n.t('events.durationMinutes', { minutes: Math.round(p.duration / 60) })
+          : '';
+        return i18n.t('events.taskCompleted', {
+          title: p.title || deletedTitle(),
+          extra,
+        });
+      }
       case 'task.status_changed':
-        return `将《${p.title || '未知任务'}》状态改为 ${p.to}`;
+        return i18n.t('events.taskStatusChanged', {
+          title: p.title || deletedTitle(),
+          status: taskStatusLabel(p.to ?? ''),
+        });
       case 'task.updated':
-        return `更新了任务《${p.title || '未知任务'}》`;
+        return i18n.t('events.taskUpdated', { title: p.title || deletedTitle() });
+      case 'task.dispatched':
+        return i18n.t('events.taskDispatchedDispatch', {
+          endpoint: p.endpoint ?? '',
+          agentId: p.agentId ?? '',
+        });
       case 'agent.updated':
       case 'agent.status_changed':
         switch (p.status) {
           case 'online':
-            return '上线';
+            return i18n.t('events.agentOnline');
           case 'offline':
-            return '下线';
+            return i18n.t('events.agentOffline');
           case 'busy':
-            return '变为忙碌';
+            return i18n.t('events.agentBusy');
           default:
-            return `状态变为 ${p.status}`;
+            return i18n.t('events.agentStatusFallback', { status: p.status ?? '' });
         }
-      case 'comment.added':
-        return `在《${p.title || '未知任务'}》下留言`;
+      case 'task.commented':
+        return i18n.t('events.commentAdded', { title: p.title || deletedTitle() });
+      case 'task.comment_deleted':
+        return i18n.t('events.commentDeleted', { title: p.title || deletedTitle() });
+      case 'task.deleted':
+        return i18n.t('events.taskDeleted', { title: p.title || deletedTitle() });
       default:
-        return action;
+        return i18n.t('events.unknownAction', { action });
     }
   } catch {
     return action;
@@ -92,21 +143,21 @@ export function formatAction(action: string, payload: string): string {
 export function getEventColor(action: string): string {
   switch (action) {
     case 'task.created':
-      return 'hsl(153, 59%, 53%)'; // 绿色
+      return 'hsl(153, 59%, 53%)';
     case 'task.claimed':
-      return 'hsl(217, 91%, 60%)'; // 蓝色
+      return 'hsl(217, 91%, 60%)';
     case 'task.completed':
-      return 'hsl(153, 59%, 53%)'; // 绿色
+      return 'hsl(153, 59%, 53%)';
     case 'task.status_changed':
-      return 'hsl(37, 91%, 55%)'; // 橙色
+      return 'hsl(37, 91%, 55%)';
     case 'task.updated':
-      return 'hsl(217, 91%, 60%)'; // 蓝色
+      return 'hsl(217, 91%, 60%)';
     case 'agent.updated':
     case 'agent.status_changed':
-      return 'hsl(180, 80%, 60%)'; // 青色
+      return 'hsl(180, 80%, 60%)';
     case 'comment.added':
-      return 'hsl(270, 80%, 60%)'; // 紫色
+      return 'hsl(270, 80%, 60%)';
     default:
-      return 'hsl(var(--muted-foreground))'; // 灰色
+      return 'hsl(var(--muted-foreground))';
   }
 }

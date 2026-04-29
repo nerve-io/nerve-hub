@@ -2,7 +2,7 @@
 @import "tailwindcss";
 
 @layer base {
-  :root {
+  html.dark {
     /* shadcn 标准变量 - 暗色主题 (HSL values without hsl() wrapper) */
     --background: 225 20% 5%;
     --foreground: 0 0% 91%;
@@ -51,6 +51,45 @@
     --glow-primary: 217 91% 60%;
     --glow-secondary: 270 50% 45%;
   }
+
+  html.light {
+    --background: 0 0% 99%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 217 91% 45%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 217 91% 45%;
+    --radius: 0.75rem;
+    --success: 142 71% 35%;
+    --success-foreground: 0 0% 100%;
+    --warning: 37 91% 42%;
+    --warning-foreground: 0 0% 100%;
+    --status-pending: 215 16% 47%;
+    --status-running: 217 91% 45%;
+    --status-blocked: 37 91% 42%;
+    --status-done: 142 71% 35%;
+    --status-failed: 0 84% 60%;
+    --priority-critical: 0 84% 60%;
+    --priority-high: 37 91% 42%;
+    --priority-medium: 217 91% 45%;
+    --priority-low: 215 16% 47%;
+    --sidebar-width: 220px;
+    --glow-primary: 217 91% 45%;
+    --glow-secondary: 270 40% 50%;
+  }
 }
 
 /* Register all shadcn semantic colors as Tailwind v4 tokens */
@@ -95,8 +134,8 @@
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
-    font-size: 14px;
-    line-height: 1.5;
+    font-size: 15px;
+    line-height: 1.6;
     -webkit-font-smoothing: antialiased;
   }
   a:focus-visible, button:focus-visible, [role="button"]:focus-visible {
@@ -141,6 +180,32 @@ a {
 
 a:hover{text-decoration:underline}
 a:focus-visible{text-decoration:underline}
+
+@layer components {
+  .page-shell {
+    @apply w-full min-w-0 space-y-6;
+  }
+
+  .page-header {
+    @apply flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between;
+  }
+
+  .page-title {
+    @apply text-2xl font-semibold tracking-tight text-foreground;
+  }
+
+  .page-description {
+    @apply mt-1 max-w-3xl text-sm leading-6 text-muted-foreground;
+  }
+
+  .surface-card {
+    @apply rounded-xl border border-border/70 bg-card/55 shadow-sm backdrop-blur-sm;
+  }
+
+  .muted-panel {
+    @apply rounded-lg border border-border/60 bg-background/45;
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

@@ -11,12 +11,13 @@ interface AppDialogProps {
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  className?: string;
 }
 
-export function AppDialog({ open, onClose, title, children }: AppDialogProps) {
+export function AppDialog({ open, onClose, title, children, className }: AppDialogProps) {
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-[480px] backdrop-blur-xl bg-card/80 border-border/50">
+      <DialogContent className={`sm:max-w-[720px] backdrop-blur-xl bg-card/95 border-border/70 ${className ?? ''}`}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription className="sr-only">{title}</DialogDescription>

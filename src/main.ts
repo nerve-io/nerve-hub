@@ -44,13 +44,17 @@ function getArg(name: string, defaultValue?: string): string | undefined {
 if (cmd === "start") {
   const port = parseInt(getArg("port", "3141")!, 10);
 
-  // Kill any existing process on the target port (prevents EADDRINUSE)
-  const proc = Bun.spawnSync(["lsof", "-tiTCP:" + port, "-sTCP:LISTEN"]);
-  const pid = proc.stdout.toString().trim();
-  if (pid) {
-    console.log(`Port ${port} in use (PID ${pid}), killing...`);
-    Bun.spawnSync(["kill", pid]);
-    Bun.sleepSync(500);
+  // Kill any existing process on the target port (prevents EADDRINUSE).
+  // Skip when `lsof` is unavailable (e.g. minimal Debian Docker images).
+  const whichLsof = Bun.spawnSync(["which", "lsof"]);
+  if (whichLsof.exitCode === 0) {
+    const proc = Bun.spawnSync(["lsof", "-tiTCP:" + port, "-sTCP:LISTEN"]);
+    const pid = proc.stdout.toString().trim();
+    if (pid) {
+      console.log(`Port ${port} in use (PID ${pid}), killing...`);
+      Bun.spawnSync(["kill", pid]);
+      Bun.sleepSync(500);
+    }
   }
 
   const db = new TaskDB(DB_PATH, {

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { healthCheck } from '../api';
 import { Button } from '@/components/ui/button';
 import {
@@ -16,6 +17,7 @@ interface SidebarProps {
 }
 
 function SidebarContent({ projects, currentPath, handoffCount = 0, onNavigate }: SidebarProps & { onNavigate?: () => void }) {
+  const { t } = useTranslation();
   const [healthy, setHealthy] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -31,7 +33,7 @@ function SidebarContent({ projects, currentPath, handoffCount = 0, onNavigate }:
     `block px-2 py-1.5 rounded-md text-sm transition-all duration-200 truncate cursor-pointer no-underline ${
       isActive
         ? 'text-primary bg-primary/15 backdrop-blur-sm'
-        : 'text-foreground/70 hover:text-foreground hover:bg-white/[0.04]'
+        : 'text-foreground/70 hover:text-foreground hover:bg-muted/50'
     }`;
 
   return (
@@ -45,14 +47,17 @@ function SidebarContent({ projects, currentPath, handoffCount = 0, onNavigate }:
       {/* Nav */}
       <nav className="flex flex-col gap-0.5 px-2">
         <Link to="/" className={navLinkClass(currentPath === '/')} onClick={onNavigate}>
-          Projects
+          {t('nav.projects')}
         </Link>
         <Link to="/agents" className={navLinkClass(currentPath === '/agents')} onClick={onNavigate}>
-          Agents
+          {t('nav.agents')}
+        </Link>
+        <Link to="/setup" className={navLinkClass(currentPath === '/setup')} onClick={onNavigate}>
+          {t('nav.setup')}
         </Link>
         <Link to="/handoff" className={navLinkClass(currentPath === '/handoff')} onClick={onNavigate}>
           <span className="flex items-center gap-2">
-            Handoff Queue
+            {t('nav.handoff')}
             {handoffCount > 0 && (
               <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">
                 {handoffCount}
@@ -61,14 +66,17 @@ function SidebarContent({ projects, currentPath, handoffCount = 0, onNavigate }:
           </span>
         </Link>
         <Link to="/events" className={navLinkClass(currentPath === '/events')} onClick={onNavigate}>
-          Event Log
+          {t('nav.eventLog')}
+        </Link>
+        <Link to="/status" className={navLinkClass(currentPath === '/status')} onClick={onNavigate}>
+          {t('nav.status')}
         </Link>
       </nav>
 
       {/* Projects */}
       <div className="flex-1 overflow-y-auto px-2 pt-4">
         <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-2 pb-2 cursor-default select-none">
-          Projects
+          {t('nav.projectList')}
         </div>
         {projects.map((p) => (
           <Link
@@ -77,7 +85,7 @@ function SidebarContent({ projects, currentPath, handoffCount = 0, onNavigate }:
             className={`block px-2 py-1.5 rounded-md text-xs transition-all duration-200 truncate cursor-pointer no-underline ${
               currentPath === `/projects/${p.id}`
                 ? 'text-primary bg-primary/15 backdrop-blur-sm'
-                : 'text-foreground/70 hover:text-foreground hover:bg-white/[0.04]'
+                : 'text-foreground/70 hover:text-foreground hover:bg-muted/50'
             }`}
             onClick={onNavigate}
           >
@@ -98,7 +106,7 @@ function SidebarContent({ projects, currentPath, handoffCount = 0, onNavigate }:
           }`}
         />
         <span className="text-muted-foreground">
-          {healthy === null ? 'Checking…' : healthy ? 'Connected' : 'Offline'}
+          {healthy === null ? t('footer.checking') : healthy ? t('footer.connected') : t('footer.offline')}
         </span>
       </div>
     </div>

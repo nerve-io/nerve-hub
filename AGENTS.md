@@ -10,7 +10,7 @@
 
 ```
 0. whoami（可选）
-   → 确认当前 Agent 身份（name + uid）
+   → 确认当前 Agent 身份（agentId + name + authMethod）
 
 1. get_my_rules()
    → 获取你自己的专属行为规则（零参数，自动识别身份）
@@ -26,7 +26,7 @@
 
 未完成以上步骤，不得开工。
 
-> **首次接入须知**：新 Agent 需要先通过 `register_agent` 注册身份，并在 MCP 配置中设置 `NERVE_HUB_AGENT_NAME` 和 `NERVE_HUB_AGENT_UID` 环境变量（推荐使用 `bun run agent-setup` 向导）。注册后 `get_my_rules()` 才能自动识别。
+> **首次接入须知**：新 Agent 需要先通过 `register_agent` 注册身份。身份验证优先级：`NERVE_HUB_TOKEN`（推荐，token 优先）→ `NERVE_HUB_AGENT_NAME`（fallback，按 agent name 匹配）。`create_task` 的默认 creator 自动使用当前 agent 的 name。推荐使用 `bun run agent-setup` 向导完成配置。
 
 ---
 

@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { getHandoffQueue, getTaskBriefing } from '../api';
 import { toast } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
+import { taskPriorityLabel, taskStatusLabel } from '../utils';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 
 const PRIORITY_STYLES: Record<string, string> = {
@@ -21,6 +23,7 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 export function HandoffQueue() {
+  const { t } = useTranslation();
   const [tasks, setTasks] = useState<any[]>([]);
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const [notifyEnabled, setNotifyEnabled] = useState(() => {
@@ -48,10 +51,10 @@ export function HandoffQueue() {
       if (permission === 'granted') {
         localStorage.setItem('notifyHandoff', 'true');
         setNotifyEnabled(true);
-        toast('Notifications enabled');
+        toast(t('handoff.notificationsEnabled'));
       }
     } catch {
-      toast('Notification not supported');
+      toast(t('handoff.notificationUnsupported'));
     }
   };
 
@@ -60,7 +63,7 @@ export function HandoffQueue() {
     try {
       const { briefing } = await getTaskBriefing(taskId);
       await navigator.clipboard.writeText(briefing);
-      toast('Briefing copied to clipboard');
+      toast(t('handoff.briefingCopied'));
     } catch (err: any) {
       toast(err.message);
     } finally {
@@ -69,66 +72,84 @@ export function HandoffQueue() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold tracking-tight">Handoff Queue</h1>
+    <div className="page-shell">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">{t('page.handoff')}</h1>
+        </div>
         {!notifyEnabled && (
           <Button onClick={handleEnableNotify} variant="outline" size="sm">
-            🔔 Enable Notifications
+            🔔 {t('handoff.enableNotifications')}
           </Button>
         )}
       </div>
 
-      {/* Task List */}
       {tasks.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 px-5 text-muted-foreground">
           <svg className="w-12 h-12 mb-4 opacity-20 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-          <div className="text-base font-medium mb-1">Queue is empty</div>
-          <div className="text-sm opacity-70">All Manual Agent tasks have been completed 🎉</div>
+          <div className="text-base font-medium mb-1">{t('handoff.queueEmpty')}</div>
+          <div className="text-sm opacity-70">{t('handoff.queueEmptyHint')}</div>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {tasks.map((task) => (
             <div
               key={task.id}
-              className="rounded-lg border border-border/50 bg-card/50 backdrop-blur-sm p-4 hover:bg-white/[0.02] transition-colors cursor-pointer"
+              className="surface-card p-4 transition-colors hover:bg-card/70"
             >
-              <div className="flex items-start justify-between gap-4">
-                <Link to={`/tasks/${task.id}`} className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <Link to={`/tasks/${task.id}`} className="min-w-0 flex-1 no-underline text-inherit">
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
                     <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium border ${PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium}`}>
-                      {task.priority}
+                      {taskPriorityLabel(task.priority)}
                     </span>
                     <span className={`text-xs ${STATUS_STYLES[task.status] || 'text-muted-foreground'}`}>
-                      {task.status}
+                      {taskStatusLabel(task.status)}
                     </span>
                   </div>
-                  <h3 className="font-medium text-sm truncate">{task.title}</h3>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                    {task.assignee && <span>👤 {task.assignee}</span>}
-                    {task.projectId && <span>📁 {task.projectId}</span>}
+                  <h3 className="line-clamp-2 text-base font-semibold leading-6">{task.title}</h3>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                    {task.assignee && <span>{t('handoff.assigneePrefix', { name: task.assignee })}</span>}
+                    {task.projectId && <span>{t('handoff.projectPrefix', { id: task.projectId })}</span>}
                   </div>
                   {task.description && (
-                    <p className="text-xs text-muted-foreground mt-2 line-clamp-2">
-                      {task.description.length > 100 ? task.description.slice(0, 100) + '...' : task.description}
-                    </p>
+                    <ExpandableText text={task.description} maxLen={100} />
                   )}
                 </Link>
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="shrink-0 h-8 px-3 text-xs cursor-pointer"
+                  className="h-9 shrink-0 self-start px-3 text-sm"
                   onClick={(e) => { e.preventDefault(); handleCopyBriefing(task.id); }}
                   disabled={copyingId === task.id}
                 >
-                  {copyingId === task.id ? '✅ Copied' : '📋 Copy Briefing'}
+                  {copyingId === task.id ? t('common.copied') : t('common.copyBriefing')}
                 </Button>
               </div>
             </div>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function ExpandableText({ text, maxLen }: { text: string; maxLen: number }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  if (text.length <= maxLen) {
+    return <p className="mt-3 max-w-5xl text-sm leading-6 text-muted-foreground">{text}</p>;
+  }
+  return (
+    <div className="mt-3 max-w-5xl text-sm leading-6 text-muted-foreground">
+      {expanded ? text : `${text.slice(0, maxLen)}...`}
+      <button
+        type="button"
+        className="ml-1 text-primary hover:underline cursor-pointer"
+        onClick={(e) => { e.preventDefault(); setExpanded(!expanded); }}
+      >
+        {expanded ? t('common.collapse') : t('common.expand')}
+      </button>
     </div>
   );
 }

@@ -214,8 +214,7 @@ async function authenticateRequest(req: Request, db: TaskDB): Promise<AuthContex
   
   // Fallback to legacy env vars
   const agentName = process.env.NERVE_HUB_AGENT_NAME;
-  const agentUid = process.env.NERVE_HUB_AGENT_UID;
-  
+
   if (agentName) {
     // Find agent by name
     const agents = db.listAgents();
@@ -282,9 +281,16 @@ export function createServer(db: TaskDB, port = 3141) {
           ? "/"
           : rawPath;
 
+        // ─── Health (before static SPA: /health has no "." and would match index) ─
+        if (path === "/health") {
+          return Response.json({ status: "ok" });
+        }
+
         // ─── Static files (serve web/dist/ for non-/api paths) ──────────
         if (!rawPath.startsWith("/api")) {
-          const distPath = new URL("../../web/dist", import.meta.url).pathname;
+          const distPath =
+            process.env.NERVE_WEB_DIST?.replace(/\/$/, "")
+            ?? new URL("../../web/dist", import.meta.url).pathname;
           // Serve index.html for SPA routes
           const filePath = rawPath === "/" || !rawPath.includes(".")
             ? `${distPath}/index.html`
@@ -300,11 +306,6 @@ export function createServer(db: TaskDB, port = 3141) {
           }
         }
 
-        // ─── Health ──────────────────────────────────────────────────────
-        if (path === "/health") {
-          return Response.json({ status: "ok" });
-        }
-
         // ─── Authenticate request ───────────────────────────────────────
         const authContext = await authenticateRequest(req, db);
         (req as RequestWithAuth).auth = authContext;
@@ -313,7 +314,6 @@ export function createServer(db: TaskDB, port = 3141) {
         if (path === "/mcp/sse") {
           const authContext = await authenticateRequest(req, db);
           const agentName = url.searchParams.get("agentName") || authContext?.agentName;
-          const agentUid = url.searchParams.get("agentUid") || undefined;
 
           if (req.method === "GET") {
             const sessionId = randomUUID();
@@ -322,7 +322,7 @@ export function createServer(db: TaskDB, port = 3141) {
               { name: "nerve-hub", version: "0.3.0" },
               { capabilities: { tools: {} } }
             );
-            registerMcpTools(mcpServer, db, { name: agentName, uid: agentUid });
+            registerMcpTools(mcpServer, db, { name: agentName });
             await mcpServer.connect(transport);
 
             mcpSessions.set(sessionId, { transport, server: mcpServer });
@@ -412,6 +412,13 @@ export function createServer(db: TaskDB, port = 3141) {
         // ─── PATCH /projects/:id ────────────────────────────────────────
         if (projectMatch && req.method === "PATCH") {
           const body = await req.json() as { name?: string; description?: string; rules?: string };
+          if (body.rules !== undefined) {
+            const authCtx = (req as RequestWithAuth).auth;
+            if (!authCtx) return unauthorized();
+            const agent = db.getAgent(authCtx.agentId);
+            const permError = db.checkPermissionLevel(agent, 'admin');
+            if (permError) return forbidden(permError);
+          }
           const updated = db.updateProject(projectMatch[1], body);
           if (!updated) return Response.json({ error: "not found" }, { status: 404 });
           broadcast({ type: "project.updated", projectId: updated.id });
@@ -503,7 +510,15 @@ export function createServer(db: TaskDB, port = 3141) {
             return badRequest(`invalid type: "${type}". must be one of: code, review, test, deploy, research, custom`);
           }
 
-          return Response.json(db.list({ projectId, status, priority, type, assignee, search, limit, offset }));
+          const authCtx = (req as RequestWithAuth).auth;
+          let agentId: string | undefined;
+          let visibilityScope: string | undefined;
+          if (authCtx) {
+            agentId = authCtx.agentId;
+            const agent = db.getAgent(authCtx.agentId);
+            visibilityScope = agent?.visibilityScope;
+          }
+          return Response.json(db.listTasksWithScope({ projectId, status, priority, type, assignee, search, limit, offset }, agentId, visibilityScope));
         }
 
         // ─── GET /tasks/:id ─────────────────────────────────────────────
@@ -511,6 +526,16 @@ export function createServer(db: TaskDB, port = 3141) {
         if (taskMatch && req.method === "GET") {
           const task = db.get(taskMatch[1]);
           if (!task) return Response.json({ error: "not found" }, { status: 404 });
+          const authCtx = (req as RequestWithAuth).auth;
+          if (authCtx) {
+            const agent = db.getAgent(authCtx.agentId);
+            if (agent?.visibilityScope === 'own' && task.assignee && task.assignee !== authCtx.agentId) {
+              return new Response(
+                `你的可见范围为「own」，无权查看此任务。当前任务接单人是「${task.assignee}」，需要「global」可见范围才能查看他人任务。请联系 Neil（admin）在 WebUI 调整你的 visibilityScope。`,
+                { status: 403 }
+              );
+            }
+          }
           return Response.json(task);
         }
 
@@ -582,6 +607,19 @@ export function createServer(db: TaskDB, port = 3141) {
             const depError = db.validateDependencies(taskMatch[1], body.dependencies);
             if (depError) return badRequest(depError);
           }
+          if (body.status === 'done') {
+            const gateError = db.validateDoneGates(taskMatch[1], body as UpdateTaskInput);
+            if (gateError) return badRequest(gateError);
+          }
+          const authCtx = (req as RequestWithAuth).auth;
+          if (authCtx) {
+            const existing = db.get(taskMatch[1]);
+            if (existing && existing.assignee && existing.assignee !== authCtx.agentId) {
+              const agent = db.getAgent(authCtx.agentId);
+              const permError = db.checkPermissionLevel(agent, 'task-any');
+              if (permError) return forbidden(permError);
+            }
+          }
           const actor = getActor(req);
           const task = db.update(taskMatch[1], body as UpdateTaskInput, actor);
           if (!task) return Response.json({ error: "not found" }, { status: 404 });
@@ -632,7 +670,8 @@ export function createServer(db: TaskDB, port = 3141) {
         if (commentMatch && req.method === "DELETE") {
           const comment = db.getComment(commentMatch[1]);
           if (!comment) return Response.json({ error: "not found" }, { status: 404 });
-          db.deleteComment(commentMatch[1]);
+          const actor = getActor(req);
+          db.deleteComment(commentMatch[1], actor);
           broadcast({ type: "task.comment_deleted", projectId: comment.projectId, taskId: comment.taskId });
           return Response.json({ deleted: true });
         }
@@ -715,11 +754,42 @@ export function createServer(db: TaskDB, port = 3141) {
 
         // PATCH /agents/:id/rules
         if (agentRulesMatch && req.method === "PATCH") {
+          const authCtx = (req as RequestWithAuth).auth;
+          if (!authCtx) return unauthorized();
+          const agent = db.getAgent(authCtx.agentId);
+          const permError = db.checkPermissionLevel(agent, 'admin');
+          if (permError) return forbidden(permError);
           const body = await req.json() as { rules: string };
           if (typeof body.rules !== "string") {
             return Response.json({ error: "rules must be a string" }, { status: 400 });
           }
           const updated = db.updateAgentRules(agentRulesMatch[1], body.rules);
+          if (!updated) return Response.json({ error: "not found" }, { status: 404 });
+          broadcast({ type: "agent.updated", agentId: updated.id });
+          return Response.json(updated);
+        }
+
+        // PATCH /agents/:id (update permissionLevel / visibilityScope)
+        if (agentMatch && req.method === "PATCH") {
+          const authCtx = (req as RequestWithAuth).auth;
+          if (!authCtx) return unauthorized();
+          const caller = db.getAgent(authCtx.agentId);
+          const permError = db.checkPermissionLevel(caller, 'admin');
+          if (permError) return forbidden(permError);
+          const body = await json(req);
+          if (body === null) return badRequest("invalid JSON");
+          const VALID_PERMISSIONS = new Set(["readonly", "task-self", "task-any", "admin"]);
+          const VALID_VISIBILITIES = new Set(["own", "global"]);
+          if (body.permissionLevel !== undefined && !VALID_PERMISSIONS.has(body.permissionLevel)) {
+            return badRequest(`invalid permissionLevel: "${body.permissionLevel}". must be one of: readonly, task-self, task-any, admin`);
+          }
+          if (body.visibilityScope !== undefined && !VALID_VISIBILITIES.has(body.visibilityScope)) {
+            return badRequest(`invalid visibilityScope: "${body.visibilityScope}". must be one of: own, global`);
+          }
+          const updated = db.updateAgentPermissions(agentMatch[1], {
+            permissionLevel: body.permissionLevel,
+            visibilityScope: body.visibilityScope,
+          });
           if (!updated) return Response.json({ error: "not found" }, { status: 404 });
           broadcast({ type: "agent.updated", agentId: updated.id });
           return Response.json(updated);

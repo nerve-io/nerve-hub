@@ -64,12 +64,17 @@ cat <<JSON
       "command": "$BINARY",
       "args": ["mcp"],
       "env": {
-        "NERVE_DB_PATH": "$DB_PATH"
+        "NERVE_DB_PATH": "$DB_PATH",
+        "NERVE_HUB_AGENT_NAME": "your-agent-name"
       }
     }
   }
 }
 JSON
+echo ""
+echo "# Optional env vars for the MCP config:"
+echo "#   NERVE_HUB_TOKEN       — preferred auth (token from register_agent / issue_agent_credential)"
+echo "#   NERVE_HUB_AGENT_NAME  — fallback auth (agent name, used if TOKEN not set); also used as default creator in create_task"
 echo ""
 echo "── Dev server (shares same DB) ──────────────────────────────────────────"
 echo "  NERVE_DB_PATH=$DB_PATH bun run dev"

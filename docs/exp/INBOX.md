@@ -20,6 +20,9 @@
 
 ## 已处理
 
+- [claude-desktop] [2026-04-29] 委托成本分析（秘书模式边界） → EXP-008
+- [cursor] [2026-04-29] OpenProse 接入策略（轻量试点） + [claude-desktop] [2026-04-29] Prose 轻量 contract 提升高价值调研质量 → 合并为 EXP-009
+
 - [claude-desktop] [2026-04-26] 调研任务多轮收敛模式 → 升格为 EXP-001
 - [claude-desktop] [2026-04-26] 约束先行原则 → 升格为 EXP-002
 - [claude-desktop] [2026-04-26] 明确结论不留开放性问题 → 升格为 EXP-003

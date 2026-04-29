@@ -42,7 +42,7 @@ export function InlineEdit({
           title="Click to edit"
         >
           {value ? (
-            <div className="prose prose-sm max-w-none">
+            <div className="prose max-w-none leading-7">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 rehypePlugins={[rehypeHighlight]}
@@ -77,7 +77,7 @@ export function InlineEdit({
     if (draft !== value) onSave(draft);
   };
 
-  const inputBaseClass = `w-full bg-background border border-primary rounded px-2 py-1 resize-vertical ${className || ''}`;
+  const inputBaseClass = `w-full bg-background border border-primary rounded px-3 py-2 text-sm leading-6 resize-vertical ${className || ''}`;
   const overLimit = maxLength !== undefined && draft.length > maxLength;
 
   if (markdown) {
@@ -104,6 +104,7 @@ export function InlineEdit({
       <div>
         <textarea
           className={inputBaseClass}
+          rows={4}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={save}

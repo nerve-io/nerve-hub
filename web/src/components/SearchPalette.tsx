@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { searchTasks } from '../api';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { statusColor, priorityColor, relativeTime } from '../utils';
+import { statusColor, priorityColor, relativeTime, taskPriorityLabel } from '../utils';
 import type { Task, Project } from '../types';
 
 interface Props {
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export function SearchPalette({ open, onClose, projects }: Props) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
@@ -72,7 +74,7 @@ export function SearchPalette({ open, onClose, projects }: Props) {
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索任务…"
+            placeholder={t('search.placeholder')}
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
@@ -80,17 +82,17 @@ export function SearchPalette({ open, onClose, projects }: Props) {
         <div className="max-h-[320px] overflow-y-auto">
           {!query.trim() && (
             <div className="py-8 text-center text-sm text-muted-foreground">
-              输入关键词搜索任务
+              {t('search.hint')}
             </div>
           )}
           {loading && (
             <div className="py-8 text-center text-sm text-muted-foreground">
-              搜索中…
+              {t('search.loading')}
             </div>
           )}
           {!loading && query.trim() && results.length === 0 && (
             <div className="py-8 text-center text-sm text-muted-foreground">
-              未找到匹配的任务
+              {t('search.noResults')}
             </div>
           )}
           {results.map((task) => (
@@ -106,9 +108,9 @@ export function SearchPalette({ open, onClose, projects }: Props) {
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium truncate">{task.title}</div>
                 <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-xs text-muted-foreground">{pMap[task.projectId] || '—'}</span>
+                  <span className="text-xs text-muted-foreground">{pMap[task.projectId] || t('common.dash')}</span>
                   <span className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ color: priorityColor(task.priority) }}>
-                    {task.priority}
+                    {taskPriorityLabel(task.priority)}
                   </span>
                   <span className="text-[10px] text-muted-foreground">{relativeTime(task.createdAt)}</span>
                 </div>

@@ -4,6 +4,7 @@ web/node_modules/
 .setup-stamp*
 dist/
 .nerve/
+/nerve-hub
 *.db
 *.db-journal
 *.tsbuildinfo

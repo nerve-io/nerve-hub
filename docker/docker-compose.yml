@@ -1,0 +1,20 @@
+services:
+  nerve-hub-test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "3142:3141"
+    volumes:
+      - nerve-test-data:/data
+    environment:
+      - NERVE_DB_PATH=/data/hub.db
+      - NERVE_WEB_DIST=/app/web/dist
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3141/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  nerve-test-data:

@@ -95,9 +95,36 @@ function getToken(): string | null {
   if (process.env.NERVE_HUB_TOKEN) {
     return process.env.NERVE_HUB_TOKEN;
   }
-  
+
   // 2. Check credentials files
   return readTokenFromCredentialsFile();
+}
+
+/** Resolve the calling agent's identity from token or legacy env var. */
+function resolveAgentIdentity(db: TaskDB, agentInfo: { name?: string }): { agentId: string; agent: ReturnType<typeof db.getAgent> } | null {
+  let agentId: string | null = null;
+
+  // Try token authentication first
+  const token = getToken();
+  if (token) {
+    const tokenHash = hashToken(token);
+    const credential = db.getAgentCredentialByTokenHash(tokenHash);
+    if (credential) {
+      agentId = credential.agentId;
+    }
+  }
+
+  // Fallback to legacy env
+  if (!agentId) {
+    agentId = agentInfo.name || null;
+  }
+
+  if (!agentId) return null;
+
+  const agent = db.getAgent(agentId);
+  if (!agent) return null;
+
+  return { agentId, agent };
 }
 
 // ─── Long-text offload ──────────────────────────────────────────────────────
@@ -129,9 +156,10 @@ const STATUS_ENUM = z.enum(["pending", "running", "done", "failed", "blocked"]);
 const PRIORITY_ENUM = z.enum(["critical", "high", "medium", "low"]);
 const TYPE_ENUM = z.enum(["code", "review", "test", "deploy", "research", "custom"]);
 
-export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { name?: string; uid?: string }) {
+export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { name?: string }) {
   let _toolCount = 0;
   let _totalDescChars = 0;
+  const actor = agentInfo.name || "mcp-agent";
 
   // ─── Core Task Tools ───────────────────────────────────────────────────
 
@@ -149,8 +177,8 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       creator: z.string().optional(),
     },
     async (args) => {
-      const creator = args.creator || agentInfo.uid || undefined;
-      const task = db.create({ title: args.title, projectId: args.projectId, description: args.description, priority: args.priority, type: args.type, assignee: args.assignee, dependencies: args.dependencies, creator });
+      const creator = args.creator || agentInfo.name || undefined;
+      const task = db.create({ title: args.title, projectId: args.projectId, description: args.description, priority: args.priority, type: args.type, assignee: args.assignee, dependencies: args.dependencies, creator }, actor);
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     }
   );
@@ -165,7 +193,16 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       result: z.string(),
     },
     async (args) => {
-      const task = db.update(args.id, { status: "done", result: args.result });
+      const gateError = db.validateDoneGates(args.id, { status: "done" });
+      if (gateError) return { content: [{ type: "text" as const, text: gateError }], isError: true };
+      const existing = db.get(args.id);
+      if (!existing) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
+      const identity = resolveAgentIdentity(db, agentInfo);
+      if (identity && existing.assignee && existing.assignee !== identity.agentId) {
+        const permError = db.checkPermissionLevel(identity.agent, 'task-any');
+        if (permError) return { content: [{ type: "text" as const, text: permError }], isError: true };
+      }
+      const task = db.update(args.id, { status: "done", result: args.result }, actor);
       if (!task) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     }
@@ -196,7 +233,12 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       assignee: z.string(),
     },
     async (args) => {
-      const task = db.update(args.id, { status: "running", assignee: args.assignee });
+      const identity = resolveAgentIdentity(db, agentInfo);
+      if (identity) {
+        const permError = db.checkPermissionLevel(identity.agent, 'task-self');
+        if (permError) return { content: [{ type: "text" as const, text: permError }], isError: true };
+      }
+      const task = db.update(args.id, { status: "running", assignee: args.assignee }, actor);
       if (!task) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     }
@@ -224,7 +266,20 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     },
     async (args) => {
       const { id, ...updates } = args;
-      const task = db.update(id, updates);
+      // Gate: prevent bypassing acceptance-field validation via update_task
+      if (updates.status === 'done') {
+        const gateError = db.validateDoneGates(id, updates as any);
+        if (gateError) return { content: [{ type: "text" as const, text: gateError }], isError: true };
+      }
+      const identity = resolveAgentIdentity(db, agentInfo);
+      if (identity) {
+        const existing = db.get(id);
+        if (existing && existing.assignee && existing.assignee !== identity.agentId) {
+          const permError = db.checkPermissionLevel(identity.agent, 'task-any');
+          if (permError) return { content: [{ type: "text" as const, text: permError }], isError: true };
+        }
+      }
+      const task = db.update(id, updates, actor);
       if (!task) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     }
@@ -260,7 +315,9 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       offset: z.number().optional(),
     },
     async (args) => {
-      const tasks = db.list({ projectId: args.projectId, status: args.status, priority: args.priority, type: args.type, assignee: args.assignee, limit: args.limit, offset: args.offset });
+      const identity = resolveAgentIdentity(db, agentInfo);
+      const filter = { projectId: args.projectId, status: args.status, priority: args.priority, type: args.type, assignee: args.assignee, limit: args.limit, offset: args.offset };
+      const tasks = db.listTasksWithScope(filter, identity?.agentId, identity?.agent?.visibilityScope);
       return { content: [{ type: "text" as const, text: JSON.stringify(tasks, null, 2) }] };
     }
   );
@@ -276,6 +333,10 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     async (args) => {
       const task = db.get(args.id);
       if (!task) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
+      const identity = resolveAgentIdentity(db, agentInfo);
+      if (identity && identity.agent?.visibilityScope === 'own' && task.assignee && task.assignee !== identity.agentId) {
+        return { content: [{ type: "text" as const, text: `你的可见范围为「own」，无权查看此任务。当前任务接单人是「${task.assignee}」，需要「global」可见范围才能查看他人任务。请联系 Neil（admin）在 WebUI 调整你的 visibilityScope。` }], isError: true };
+      }
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     }
   );
@@ -322,7 +383,8 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       project_id: z.string().optional(),
     },
     async (args) => {
-      const tasks = db.list({ search: args.query, projectId: args.project_id });
+      const identity = resolveAgentIdentity(db, agentInfo);
+      const tasks = db.listTasksWithScope({ search: args.query, projectId: args.project_id }, identity?.agentId, identity?.agent?.visibilityScope);
       return { content: [{ type: "text" as const, text: JSON.stringify(tasks, null, 2) }] };
     }
   );
@@ -406,6 +468,8 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       heartbeat_interval: z.number().optional(),
       metadata: z.string().optional(),
       capabilities: z.string().optional(),
+      permission_level: z.enum(["readonly", "task-self", "task-any", "admin"]).optional(),
+      visibility_scope: z.enum(["own", "global"]).optional(),
     },
     async (args) => {
       const agent = db.registerAgent({
@@ -416,6 +480,8 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
         heartbeatInterval: args.heartbeat_interval,
         metadata: args.metadata,
         capabilities: args.capabilities,
+        permissionLevel: args.permission_level,
+        visibilityScope: args.visibility_scope,
       });
       return { content: [{ type: "text" as const, text: JSON.stringify(agent, null, 2) }] };
     }
@@ -434,6 +500,30 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
   );
   _toolCount++;
   _totalDescChars += "List all registered Agents and their current status".length;
+
+  server.tool(
+    "update_agent_permissions",
+    "Update an agent's permissionLevel and/or visibilityScope. Admin-only.",
+    {
+      agent_id: z.string(),
+      permission_level: z.enum(["readonly", "task-self", "task-any", "admin"]).optional(),
+      visibility_scope: z.enum(["own", "global"]).optional(),
+    },
+    async (args) => {
+      const identity = resolveAgentIdentity(db, agentInfo);
+      if (!identity) return { content: [{ type: "text" as const, text: "无法识别你的 Agent 身份。请检查 NERVE_HUB_TOKEN 或 NERVE_HUB_AGENT_NAME 配置。" }], isError: true };
+      const permError = db.checkPermissionLevel(identity.agent, 'admin');
+      if (permError) return { content: [{ type: "text" as const, text: permError }], isError: true };
+      const agent = db.updateAgentPermissions(args.agent_id, {
+        permissionLevel: args.permission_level,
+        visibilityScope: args.visibility_scope,
+      });
+      if (!agent) return { content: [{ type: "text" as const, text: `Error: agent "${args.agent_id}" not found` }], isError: true };
+      return { content: [{ type: "text" as const, text: JSON.stringify(agent, null, 2) }] };
+    }
+  );
+  _toolCount++;
+  _totalDescChars += "Update an agent's permissionLevel and/or visibilityScope. Admin-only.".length;
 
   // ─── Agent Credential Tools ─────────────────────────────────────────────
 
@@ -619,7 +709,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     },
     async (args) => {
       try {
-        const comment = db.createComment({ taskId: args.task_id, body: args.body }, "mcp-agent");
+        const comment = db.createComment({ taskId: args.task_id, body: args.body }, actor);
         return { content: [{ type: "text" as const, text: JSON.stringify(comment, null, 2) }] };
       } catch (err: any) {
         return { content: [{ type: "text" as const, text: `Error: ${err.message}` }], isError: true };
@@ -668,7 +758,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       id: z.string(),
     },
     async (args) => {
-      const ok = db.delete(args.id);
+      const ok = db.delete(args.id, actor);
       if (!ok) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
       return { content: [{ type: "text" as const, text: "Deleted" }] };
     }
@@ -683,7 +773,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       comment_id: z.string(),
     },
     async (args) => {
-      const ok = db.deleteComment(args.comment_id);
+      const ok = db.deleteComment(args.comment_id, actor);
       if (!ok) return { content: [{ type: "text" as const, text: "Error: comment not found" }], isError: true };
       return { content: [{ type: "text" as const, text: "Deleted" }] };
     }
@@ -708,7 +798,6 @@ export async function startMcp(db: TaskDB) {
 
   registerMcpTools(server, db, {
     name: process.env.NERVE_HUB_AGENT_NAME,
-    uid: process.env.NERVE_HUB_AGENT_UID
   });
 
   // ─── Connect ─────────────────────────────────────────────────────────────

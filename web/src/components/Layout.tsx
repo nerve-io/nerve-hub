@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { listProjects, getHandoffQueue } from '../api';
 import { Sidebar } from './Sidebar';
 import { SearchPalette } from './SearchPalette';
+import { ThemeLangToolbar } from './ThemeLangToolbar';
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -13,6 +15,7 @@ interface LayoutProps {
 }
 
 export function Layout({ children, currentPath }: LayoutProps) {
+  const { t } = useTranslation();
   const [projects, setProjects] = useState<Project[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -43,8 +46,13 @@ export function Layout({ children, currentPath }: LayoutProps) {
   return (
     <div className="flex h-screen">
       <Sidebar projects={projects} currentPath={currentPath} handoffCount={handoffCount} />
-      <main className="flex-1 min-h-0 overflow-y-auto px-6 py-6 min-w-0">
-        {children}
+      <main className="flex-1 min-h-0 overflow-y-auto min-w-0 px-4 py-5 sm:px-6 lg:px-8">
+        <div className="mx-auto w-full max-w-[1680px] min-w-0">
+          <div className="flex justify-end mb-4">
+            <ThemeLangToolbar />
+          </div>
+          {children}
+        </div>
       </main>
 
       <SearchPalette
@@ -57,14 +65,14 @@ export function Layout({ children, currentPath }: LayoutProps) {
       <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
         <DialogContent className="sm:max-w-[400px] backdrop-blur-xl bg-card/80 border-border/50">
           <DialogHeader>
-            <DialogTitle>键盘快捷键</DialogTitle>
+            <DialogTitle>{t('shortcuts.title')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-2 px-6 pb-6">
             {[
-              { keys: 'N', desc: '新建任务（看板页）' },
-              { keys: '⌘K', desc: '全局搜索' },
-              { keys: '?', desc: '显示此帮助' },
-              { keys: 'Esc', desc: '关闭弹窗' },
+              { keys: 'N', desc: t('shortcuts.newTask') },
+              { keys: '⌘K', desc: t('shortcuts.search') },
+              { keys: '?', desc: t('shortcuts.help') },
+              { keys: 'Esc', desc: t('shortcuts.esc') },
             ].map((item) => (
               <div key={item.keys} className="flex items-center justify-between py-1">
                 <span className="text-sm text-muted-foreground">{item.desc}</span>

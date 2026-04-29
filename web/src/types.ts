@@ -116,6 +116,12 @@ export const ALL_TYPES: TaskType[] = ['code', 'review', 'test', 'deploy', 'resea
 export type AgentType = 'webhook' | 'manual';
 export type AgentStatus = 'online' | 'offline' | 'busy';
 
+/** 与后端 agents.permission_level 一致 */
+export type PermissionLevel = 'readonly' | 'task-self' | 'task-any' | 'admin';
+
+/** 与后端 agents.visibility_scope 一致 */
+export type VisibilityScope = 'own' | 'global';
+
 export interface Agent {
   id: string;
   name: string;
@@ -130,5 +136,7 @@ export interface Agent {
     languages: string[];
   };
   rules?: string;
+  permissionLevel?: PermissionLevel;
+  visibilityScope?: VisibilityScope;
   createdAt: string;
 }

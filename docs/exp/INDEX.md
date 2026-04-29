@@ -32,6 +32,8 @@
 | # | 标题 | 成熟度 |
 |---|------|--------|
 | 006 | [Orchestrator 作为调研报告的 reviewer](exp-006.md) | 🔵 |
+| 008 | [委托成本与秘书模式边界](exp-008.md) | 🔵 |
+| 009 | [OpenProse 与轻量 contract 试点](exp-009.md) | 🔵 |
 
 ---
 ## 完整 EXP 列表
@@ -45,3 +47,5 @@
 | 005 | 确定性归代码，非确定性归 Agent | [`exp-005.md`](exp-005.md) |
 | 006 | Orchestrator 作为调研报告的独立 Reviewer | [`exp-006.md`](exp-006.md) |
 | 007 | 配置变量保持正交，不推导耦合 | [`exp-007.md`](exp-007.md) |
+| 008 | 委托成本与秘书模式边界 | [`exp-008.md`](exp-008.md) |
+| 009 | OpenProse 与轻量 contract 试点 | [`exp-009.md`](exp-009.md) |

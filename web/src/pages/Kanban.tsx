@@ -10,9 +10,10 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MarkdownEditor } from '@/components/MarkdownEditor';
-import { statusColor, priorityColor, typeColor } from '../utils';
+import { statusColor, priorityColor, typeColor, taskStatusLabel, taskPriorityLabel, taskTypeLabel } from '../utils';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { useKeyboardShortcut } from '@/hooks/useKeyboardShortcut';
+import { useTranslation } from 'react-i18next';
 import type { Task, TaskStatus, TaskPriority, TaskType } from '../types';
 
 const STATUSES: TaskStatus[] = ['pending', 'running', 'blocked', 'done', 'failed'];
@@ -24,6 +25,7 @@ interface Props {
 }
 
 export function Kanban({ projectId }: Props) {
+  const { t } = useTranslation();
   const [project, setProject] = useState<any>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [blockedByMap, setBlockedByMap] = useState<Record<string, boolean>>({});
@@ -147,21 +149,24 @@ export function Kanban({ projectId }: Props) {
     try {
       await updateTask(taskId, { status: status as TaskStatus });
       load();
-      toastWithUndo(`已移至 ${status}`, async () => {
-        try {
-          await updateTask(taskId, { status: previousStatus });
-          load();
-        } catch (err: any) {
-          toast(err.message);
-        }
-      });
+      toastWithUndo(
+        t('kanban.movedToStatus', { status: taskStatusLabel(status) }),
+        async () => {
+          try {
+            await updateTask(taskId, { status: previousStatus });
+            load();
+          } catch (err: any) {
+            toast(err.message);
+          }
+        },
+      );
     } catch (err: any) {
       toast(err.message);
     }
   };
 
   const filteredTasks = tasks.filter((t) => {
-    if (filterAssignee && !t.assignee.toLowerCase().includes(filterAssignee.toLowerCase())) return false;
+    if (filterAssignee && !(t.assignee || '').toLowerCase().includes(filterAssignee.toLowerCase())) return false;
     if (filterType !== 'all' && t.type !== filterType) return false;
     if (filterPriority !== 'all' && t.priority !== filterPriority) return false;
     return true;
@@ -175,51 +180,53 @@ export function Kanban({ projectId }: Props) {
   }));
 
   return (
-    <div className="flex flex-col h-[calc(100vh-48px)]">
+    <div className="flex h-[calc(100vh-6rem)] min-h-[620px] flex-col">
       <div className="mb-5 shrink-0">
-        <Link to="/" className="text-sm text-muted-foreground hover:text-foreground mb-2 inline-block no-underline">← Back</Link>
-        <div className="flex items-baseline gap-3">
-          <h1 className="text-[22px] font-semibold tracking-tight">{project?.name || 'Loading…'}</h1>
-          {project?.description && (
-            <span className="text-sm text-muted-foreground">{project.description}</span>
-          )}
+        <Link to="/" className="text-sm text-muted-foreground hover:text-foreground mb-2 inline-block no-underline">← {t('common.back')}</Link>
+        <div className="page-header">
+          <div>
+            <h1 className="page-title">{project?.name || t('page.loading')}</h1>
+            {project?.description && (
+              <p className="page-description">{project.description}</p>
+            )}
+          </div>
           {hasFilter && (
-            <span className="text-xs text-muted-foreground ml-auto">
-              {filteredTasks.length} / {tasks.length} tasks
+            <span className="rounded-full border border-border/70 bg-background/50 px-3 py-1 text-sm text-muted-foreground">
+              {t('kanban.taskCount', { filtered: filteredTasks.length, total: tasks.length, unit: t('common.tasksUnit') })}
             </span>
           )}
         </div>
       </div>
 
       {/* Filter bar */}
-      <div className="flex items-center gap-3 mb-4 shrink-0 flex-wrap">
+      <div className="surface-card mb-4 flex shrink-0 flex-wrap items-center gap-3 p-3">
         <div className="relative">
           <Input
             value={filterAssignee}
             onChange={(e) => setFilterAssignee(e.target.value)}
-            placeholder="Filter by assignee"
-            className="h-8 w-[180px] text-[13px]"
+            placeholder={t('kanban.filterAssignee')}
+            className="h-9 w-[220px] text-sm"
           />
         </div>
         <Select value={filterType} onValueChange={(v) => setFilterType(v as TaskType | 'all')}>
-          <SelectTrigger className="h-8 w-[130px] text-[13px]">
-            <SelectValue placeholder="All types" />
+          <SelectTrigger className="h-9 w-[150px] text-sm">
+            <SelectValue placeholder={t('kanban.allTypes')} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All types</SelectItem>
-            {TYPES.map((t) => (
-              <SelectItem key={t} value={t} color={typeColor(t)}>{t}</SelectItem>
+            <SelectItem value="all">{t('kanban.allTypes')}</SelectItem>
+            {TYPES.map((typ) => (
+              <SelectItem key={typ} value={typ} color={typeColor(typ)}>{taskTypeLabel(typ)}</SelectItem>
             ))}
           </SelectContent>
         </Select>
         <Select value={filterPriority} onValueChange={(v) => setFilterPriority(v as TaskPriority | 'all')}>
-          <SelectTrigger className="h-8 w-[140px] text-[13px]">
-            <SelectValue placeholder="All priorities" />
+          <SelectTrigger className="h-9 w-[160px] text-sm">
+            <SelectValue placeholder={t('kanban.allPriorities')} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All priorities</SelectItem>
-            {PRIORITIES.map((p) => (
-              <SelectItem key={p} value={p} color={priorityColor(p)}>{p}</SelectItem>
+            <SelectItem value="all">{t('kanban.allPriorities')}</SelectItem>
+            {PRIORITIES.map((pr) => (
+              <SelectItem key={pr} value={pr} color={priorityColor(pr)}>{taskPriorityLabel(pr)}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -227,33 +234,33 @@ export function Kanban({ projectId }: Props) {
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 text-xs text-muted-foreground hover:text-foreground"
+            className="h-9 text-sm text-muted-foreground hover:text-foreground"
             onClick={() => { setFilterAssignee(''); setFilterType('all'); setFilterPriority('all'); }}
           >
-            ✕ 清除
+            ✕ {t('kanban.clearFilters')}
           </Button>
         )}
       </div>
 
-      <div className="flex gap-3 flex-1 overflow-x-auto overflow-y-hidden pb-2">
+      <div className="flex flex-1 gap-4 overflow-x-auto overflow-y-hidden pb-3">
         {columns.map((col) => (
           <div
             key={col.status}
-            className={`flex-1 min-w-[220px] bg-card/40 backdrop-blur-sm border border-border rounded-lg flex flex-col transition-colors ${
+            className={`surface-card flex min-w-[280px] flex-[1_1_0] flex-col transition-colors xl:min-w-[300px] ${
               dragOverCol === col.status ? 'border-primary/60 shadow-[0_0_15px_hsl(var(--glow-primary)/0.2)]' : ''
             }`}
             onDragOver={(e) => handleDragOver(e, col.status)}
             onDragLeave={handleDragLeave}
             onDrop={() => handleDrop(col.status)}
           >
-            <div className="flex items-center justify-between px-3 py-3 pb-2 shrink-0">
-              <div className="flex items-center gap-1.5 text-xs font-semibold capitalize text-muted-foreground">
+            <div className="flex shrink-0 items-center justify-between border-b border-border/50 px-4 py-3">
+              <div className="flex items-center gap-2 text-sm font-semibold capitalize text-foreground">
                 <span
                   className="w-2 h-2 rounded-full"
                   style={{ background: statusColor(col.status) }}
                 />
-                {col.status}
-                <Badge variant="secondary" className="ml-1 text-[11px] font-medium bg-white/[0.08]">
+                {taskStatusLabel(col.status)}
+                <Badge variant="secondary" className="ml-1 bg-background/70 text-xs font-medium">
                   {col.tasks.length}
                 </Badge>
               </div>
@@ -269,47 +276,75 @@ export function Kanban({ projectId }: Props) {
                 +
               </Button>
             </div>
-            <div className="flex-1 overflow-y-auto px-2 pb-2 flex flex-col gap-1.5">
-              {col.tasks.map((task) => {
+            <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-3">
+              {col.tasks.length === 0 ? (
+                <div className="muted-panel flex min-h-[120px] items-center justify-center px-4 text-center text-sm text-muted-foreground">
+                  {hasFilter ? t('kanban.noFilteredTasks') : t('kanban.emptyColumn')}
+                </div>
+              ) : col.tasks.map((task) => {
                 const blocked = blockedByMap[task.id] === true;
+                const assigneeStr = task.assignee?.trim() ?? '';
+                const creatorStr = task.creator?.trim() ?? '';
+                const primaryAgent = assigneeStr || creatorStr;
                 return (
                   <Link
                     key={task.id}
                     to={`/tasks/${task.id}`}
-                    className={`block backdrop-blur-sm bg-card/50 border border-border rounded-md p-2.5 px-3 cursor-grab transition-all hover:border-white/20 hover:shadow-[0_2px_10px_hsl(0_0%_0%/0.3)] active:cursor-grabbing no-underline text-inherit ${
+                    className={`block rounded-lg border border-border/70 bg-background/55 p-3 no-underline text-inherit backdrop-blur-sm transition-all hover:border-primary/40 hover:shadow-[0_2px_12px_hsl(var(--glow-primary)/0.15)] active:cursor-grabbing ${
                       blocked ? 'border-l-[3px] border-l-destructive' : ''
                     }`}
                     draggable
                     onDragStart={() => handleDragStart(task.id)}
                   >
-                    <div className="flex justify-end mb-1">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-muted-foreground">{taskPriorityLabel(task.priority)}</span>
                       <span
-                        className="w-2 h-2 rounded-sm"
-                        style={{ background: priorityColor(task.priority) }}
-                        title={task.priority}
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ background: statusColor(task.status) }}
+                        title={task.status}
                       />
                     </div>
-                    <div className="text-[13px] font-medium leading-snug line-clamp-2 mb-2">
+                    <div className="mb-3 line-clamp-3 text-sm font-medium leading-5">
                       {task.title}
                     </div>
-                    <div className="flex items-center justify-between">
-                      <Badge variant="secondary" className="text-[11px] bg-white/[0.06]">
-                        {task.type}
-                      </Badge>
-                      {task.assignee && (
+                    <div className="flex items-center justify-between gap-2 min-h-[22px]">
+                      <div className="flex items-center gap-1.5 min-w-0">
                         <span
-                          className="w-[22px] h-[22px] rounded-full bg-primary text-primary-foreground text-[11px] font-semibold flex items-center justify-center"
-                          title={task.assignee}
-                        >
-                          {task.assignee.charAt(0).toUpperCase()}
-                        </span>
+                          className="w-2 h-2 rounded-sm shrink-0"
+                          style={{ background: priorityColor(task.priority) }}
+                          title={task.priority}
+                        />
+                        <Badge variant="secondary" className="text-[11px] bg-white/[0.06] truncate max-w-[min(100%,11rem)]">
+                          {taskTypeLabel(task.type)}
+                        </Badge>
+                      </div>
+                      {primaryAgent && (
+                        <div className="flex items-center gap-1.5 shrink-0 max-w-[55%]">
+                          <span
+                            className="text-[11px] text-muted-foreground truncate text-right"
+                            title={assigneeStr ? t('kanban.assigneeLabel', { name: assigneeStr }) : t('kanban.creatorLabel', { name: creatorStr })}
+                          >
+                            {assigneeStr ? (
+                              <>
+                                <span className="text-muted-foreground">{t('kanban.assigneePrefix')}：</span>
+                                <span className="text-foreground/90">{assigneeStr}</span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="text-muted-foreground">{t('kanban.creatorPrefix')}：</span>
+                                <span className="text-foreground/90">{creatorStr}</span>
+                              </>
+                            )}
+                          </span>
+                          <span
+                            className="w-[22px] h-[22px] rounded-full bg-primary text-primary-foreground text-[11px] font-semibold flex items-center justify-center shrink-0"
+                            title={primaryAgent}
+                          >
+                            {primaryAgent.charAt(0).toUpperCase()}
+                          </span>
+                        </div>
                       )}
                     </div>
-                    {task.creator && (
-                      <span className="text-[11px] text-muted-foreground mt-1 inline-block">
-                        派单：{task.creator}
-                      </span>
-                    )}
                   </Link>
                 );
               })}
@@ -318,11 +353,11 @@ export function Kanban({ projectId }: Props) {
         ))}
       </div>
 
-      <AppDialog open={modalOpen} onClose={() => setModalOpen(false)} title="New Task">
+      <AppDialog open={modalOpen} onClose={() => setModalOpen(false)} title={t('kanban.newTaskTitle')}>
         <div className="space-y-4 px-6 pb-6">
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label htmlFor="task-title">Title</Label>
+              <Label htmlFor="task-title">{t('kanban.taskTitle')}</Label>
               <span className={`text-[11px] ${formTitle.length > 200 ? 'text-destructive' : 'text-muted-foreground'}`}>
                 {formTitle.length}/200
               </span>
@@ -331,7 +366,7 @@ export function Kanban({ projectId }: Props) {
               id="task-title"
               value={formTitle}
               onChange={(e) => setFormTitle(e.target.value)}
-              placeholder="Task title"
+              placeholder={t('kanban.taskTitlePlaceholder')}
               maxLength={200}
               autoFocus
               onKeyDown={(e) => e.key === 'Enter' && handleCreateTask()}
@@ -339,7 +374,7 @@ export function Kanban({ projectId }: Props) {
           </div>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label htmlFor="task-desc">Description</Label>
+              <Label htmlFor="task-desc">{t('kanban.description')}</Label>
               <span className={`text-[11px] ${formDesc.length > 5000 ? 'text-destructive' : 'text-muted-foreground'}`}>
                 {formDesc.length}/5000
               </span>
@@ -353,39 +388,39 @@ export function Kanban({ projectId }: Props) {
           </div>
           <div className="flex gap-3">
             <div className="flex-1 space-y-2">
-              <Label>Priority</Label>
+              <Label>{t('kanban.priority')}</Label>
               <Select value={formPriority} onValueChange={(v) => setFormPriority(v as TaskPriority)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {PRIORITIES.map((p) => (
-                    <SelectItem key={p} value={p} color={priorityColor(p)}>{p}</SelectItem>
+                  {PRIORITIES.map((pr) => (
+                    <SelectItem key={pr} value={pr} color={priorityColor(pr)}>{taskPriorityLabel(pr)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="flex-1 space-y-2">
-              <Label>Type</Label>
+              <Label>{t('kanban.type')}</Label>
               <Select value={formType} onValueChange={(v) => setFormType(v as TaskType)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {TYPES.map((t) => (
-                    <SelectItem key={t} value={t} color={typeColor(t)}>{t}</SelectItem>
+                  {TYPES.map((typ) => (
+                    <SelectItem key={typ} value={typ} color={typeColor(typ)}>{taskTypeLabel(typ)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
           </div>
           <div className="space-y-2">
-            <Label>Assignee</Label>
+            <Label>{t('kanban.assignee')}</Label>
             <Select value={formAssignee} onValueChange={setFormAssignee}>
               <SelectTrigger>
-                <SelectValue placeholder="Select agent" />
+                <SelectValue placeholder={t('kanban.selectAgent')} />
               </SelectTrigger>
               <SelectContent>
                 {loadingAgents ? (
-                  <SelectItem value="" disabled>Loading agents...</SelectItem>
+                  <SelectItem value="" disabled>{t('kanban.loadingAgents')}</SelectItem>
                 ) : agents.length === 0 ? (
-                  <SelectItem value="" disabled>暂无可用 Agent</SelectItem>
+                  <SelectItem value="" disabled>{t('kanban.noAgentsAvailable')}</SelectItem>
                 ) : (
                   agents.map((agent) => (
                     <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
@@ -395,13 +430,13 @@ export function Kanban({ projectId }: Props) {
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Depends on</Label>
+            <Label>{t('kanban.dependsOn')}</Label>
             <Select value={formDep} onValueChange={setFormDep}>
               <SelectTrigger>
-                <SelectValue placeholder="None" />
+                <SelectValue placeholder={t('common.none')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">None</SelectItem>
+                <SelectItem value="">{t('common.none')}</SelectItem>
                 {tasks.map((task) => (
                   <SelectItem key={task.id} value={task.id}>{task.title}</SelectItem>
                 ))}
@@ -410,10 +445,10 @@ export function Kanban({ projectId }: Props) {
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="ghost" onClick={() => setModalOpen(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button onClick={handleCreateTask} disabled={!formTitle.trim()}>
-              Create
+              {t('common.create')}
             </Button>
           </div>
         </div>

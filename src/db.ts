@@ -148,6 +148,15 @@ export interface Comment {
 
 export type AgentType = 'webhook' | 'manual';
 export type AgentStatus = 'online' | 'offline' | 'busy';
+export type PermissionLevel = 'readonly' | 'task-self' | 'task-any' | 'admin';
+export type VisibilityScope = 'own' | 'global';
+
+const PERMISSION_ORDER: Record<PermissionLevel, number> = {
+  'readonly': 0,
+  'task-self': 1,
+  'task-any': 2,
+  'admin': 3,
+};
 
 export interface AgentCapabilities {
   taskTypes?: string[];
@@ -167,6 +176,8 @@ export interface Agent {
   status: AgentStatus;
   metadata?: string;
   capabilities?: AgentCapabilities;
+  permissionLevel?: PermissionLevel;
+  visibilityScope?: VisibilityScope;
   rules?: string;
   createdAt: string;
 }
@@ -376,6 +387,46 @@ const MIGRATIONS: Migration[] = [
       addColumnIfNotExists(db, "tasks", "selftest_report", "TEXT");
       addColumnIfNotExists(db, "tasks", "known_issues", "TEXT");
       addColumnIfNotExists(db, "tasks", "uncovered_scope", "TEXT");
+    },
+  },
+  {
+    version: 17,
+    name: "add_agent_permission_fields",
+    up(db) {
+      db.exec(`ALTER TABLE agents ADD COLUMN permission_level TEXT NOT NULL DEFAULT 'task-any'`);
+      db.exec(`ALTER TABLE agents ADD COLUMN visibility_scope TEXT NOT NULL DEFAULT 'global'`);
+      db.exec(`UPDATE agents SET permission_level = 'admin' WHERE id = 'claude-desktop'`);
+    },
+  },
+  {
+    version: 18,
+    name: "backfill_event_task_titles",
+    up(db) {
+      // For events that are missing $.title in payload, backfill from the
+      // task.created event for the same task_id (which always had title).
+      db.exec(`
+        UPDATE events
+        SET payload = json_set(
+          payload,
+          '$.title',
+          (SELECT json_extract(e2.payload, '$.title')
+           FROM events e2
+           WHERE e2.task_id = events.task_id
+             AND e2.action = 'task.created'
+             AND json_extract(e2.payload, '$.title') IS NOT NULL
+           LIMIT 1)
+        )
+        WHERE action IN ('task.updated', 'task.status_changed', 'task.commented', 'task.comment_deleted')
+          AND task_id != ''
+          AND (json_extract(payload, '$.title') IS NULL
+               OR json_type(payload, '$.title') = 'null')
+          AND EXISTS (
+            SELECT 1 FROM events e3
+            WHERE e3.task_id = events.task_id
+              AND e3.action = 'task.created'
+              AND json_extract(e3.payload, '$.title') IS NOT NULL
+          );
+      `);
     },
   },
 ];
@@ -655,10 +706,10 @@ export class TaskDB {
     // Log events
     const inputWithoutCreator = { ...input };
     delete (inputWithoutCreator as any).creator;
-    this.logEvent({ projectId: updated.projectId, taskId: id, actor, action: "task.updated", payload: Object.fromEntries(Object.entries(inputWithoutCreator)) });
+    this.logEvent({ projectId: updated.projectId, taskId: id, actor, action: "task.updated", payload: { title: updated.title, ...Object.fromEntries(Object.entries(inputWithoutCreator)) } });
 
     if (input.status && input.status !== existing.status) {
-      this.logEvent({ projectId: updated.projectId, taskId: id, actor, action: "task.status_changed", payload: { from: existing.status, to: input.status } });
+      this.logEvent({ projectId: updated.projectId, taskId: id, actor, action: "task.status_changed", payload: { title: updated.title, from: existing.status, to: input.status } });
       this._checkBatchComplete(updated, existing.status);
     }
 
@@ -757,6 +808,35 @@ export class TaskDB {
     return null;
   }
 
+  /** Require acceptance fields + reflection before marking code/research/review tasks done. */
+  validateDoneGates(id: string, input: { status?: string; selftestReport?: string | null; knownIssues?: string | null; uncoveredScope?: string | null; reflection?: string | null }): string | null {
+    if (input.status !== 'done') return null;
+
+    const task = this.get(id);
+    if (!task) return 'task not found';
+
+    const GATED_TYPES = new Set(['code', 'research', 'review']);
+    if (!GATED_TYPES.has(task.type)) return null;
+
+    // Merge incoming values with existing task state
+    const selftest = input.selftestReport !== undefined ? input.selftestReport : task.selftestReport;
+    const known   = input.knownIssues !== undefined ? input.knownIssues : task.knownIssues;
+    const scope   = input.uncoveredScope !== undefined ? input.uncoveredScope : task.uncoveredScope;
+    const refl    = input.reflection !== undefined ? input.reflection : task.reflection;
+
+    const missing: string[] = [];
+    if (!selftest?.trim()) missing.push('selftestReport（自测过程与结论）');
+    if (!known?.trim())   missing.push('knownIssues（已知未修复问题）');
+    if (!scope?.trim())   missing.push('uncoveredScope（未覆盖的测试范围）');
+    if (!refl?.trim())    missing.push('reflection（执行反思，100字以内）');
+
+    if (missing.length > 0) {
+      return `完成门禁未通过。以下必填字段为空，请在标记完成前通过 update_task 填入：\n${missing.map(f => `  - ${f}`).join('\n')}`;
+    }
+
+    return null;
+  }
+
   // ─── Comments ────────────────────────────────────────────────────────────────
 
   createComment(input: { taskId: string; body: string }, actor = "system"): Comment {
@@ -774,7 +854,7 @@ export class TaskDB {
       taskId: input.taskId,
       actor,
       action: "task.commented",
-      payload: { body: input.body.slice(0, 100) },
+      payload: { title: task.title, body: input.body.slice(0, 100) },
     });
 
     return { id, taskId: input.taskId, projectId: task.projectId, actor, body: input.body, createdAt: now };
@@ -801,14 +881,17 @@ export class TaskDB {
     return { id: r.id, taskId: r.task_id, projectId: r.project_id, actor: r.actor, body: r.body, createdAt: r.created_at };
   }
 
-  deleteComment(commentId: string): boolean {
+  deleteComment(commentId: string, actor = "system"): boolean {
     const comment = this.db.prepare(`SELECT * FROM comments WHERE id = ?`).get(commentId) as any;
     if (!comment) return false;
     this.db.prepare(`DELETE FROM comments WHERE id = ?`).run(commentId);
+    const task = this.get(comment.task_id);
     this.logEvent({
       projectId: comment.project_id,
       taskId: comment.task_id,
+      actor,
       action: "task.comment_deleted",
+      payload: { title: task?.title ?? comment.task_id },
     });
     return true;
   }
@@ -850,11 +933,13 @@ export class TaskDB {
     heartbeatInterval?: number;
     metadata?: string;
     capabilities?: AgentCapabilities | string;
+    permissionLevel?: PermissionLevel;
+    visibilityScope?: VisibilityScope;
   }): Agent {
     const now = new Date().toISOString();
     this.db.prepare(`
-      INSERT INTO agents (id, name, type, endpoint, heartbeat_interval, last_seen, status, metadata, capabilities, created_at)
-      VALUES (?, ?, ?, ?, ?, NULL, 'offline', ?, ?, ?)
+      INSERT INTO agents (id, name, type, endpoint, heartbeat_interval, last_seen, status, metadata, capabilities, permission_level, visibility_scope, created_at)
+      VALUES (?, ?, ?, ?, ?, NULL, 'offline', ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         type = excluded.type,
@@ -872,6 +957,8 @@ export class TaskDB {
       input.capabilities
         ? (typeof input.capabilities === "string" ? input.capabilities : JSON.stringify(input.capabilities))
         : null,
+      input.permissionLevel ?? 'task-any',
+      input.visibilityScope ?? 'global',
       now,
     );
     return this.getAgent(input.id)!;
@@ -908,6 +995,85 @@ export class TaskDB {
       `UPDATE agents SET rules = ? WHERE id = ?`
     ).run(rules, id);
     return this.getAgent(id);
+  }
+
+  updateAgentPermissions(id: string, fields: { permissionLevel?: PermissionLevel; visibilityScope?: VisibilityScope }): Agent | undefined {
+    const existing = this.getAgent(id);
+    if (!existing) return undefined;
+
+    const updates: string[] = [];
+    const params: any[] = [];
+
+    if (fields.permissionLevel !== undefined) {
+      updates.push("permission_level = ?");
+      params.push(fields.permissionLevel);
+    }
+    if (fields.visibilityScope !== undefined) {
+      updates.push("visibility_scope = ?");
+      params.push(fields.visibilityScope);
+    }
+
+    if (updates.length === 0) return existing;
+
+    params.push(id);
+    this.db.prepare(`UPDATE agents SET ${updates.join(", ")} WHERE id = ?`).run(...params);
+    return this.getAgent(id);
+  }
+
+  /** Return sorted list of tasks, optionally restricted by visibility scope. */
+  listTasksWithScope(filter: Parameters<typeof this.list>[0], agentId?: string, visibilityScope?: string): Task[] {
+    if (visibilityScope !== 'own' || !agentId) {
+      return this.list(filter);
+    }
+
+    const where = `(assignee = ? OR assignee IS NULL)`;
+    const conditions: string[] = [where];
+    const params: any[] = [agentId];
+
+    if (filter?.projectId) {
+      conditions.push("project_id = ?");
+      params.push(filter.projectId);
+    }
+    if (filter?.status) {
+      conditions.push("status = ?");
+      params.push(filter.status);
+    }
+    if (filter?.priority) {
+      conditions.push("priority = ?");
+      params.push(filter.priority);
+    }
+    if (filter?.type) {
+      conditions.push("type = ?");
+      params.push(filter.type);
+    }
+    if (filter?.assignee) {
+      // Allow the caller to further narrow within own tasks
+      conditions.push("assignee = ?");
+      params.push(filter.assignee);
+    }
+    if (filter?.search) {
+      conditions.push("(LOWER(title) LIKE '%' || LOWER(?) || '%' OR LOWER(description) LIKE '%' || LOWER(?) || '%')");
+      params.push(filter.search, filter.search);
+    }
+
+    const fullWhere = `WHERE ${conditions.join(" AND ")}`;
+    const limit = Math.min(filter?.limit ?? 10, 100);
+    const offset = filter?.offset ?? 0;
+    const rows = this.db.prepare(`SELECT * FROM tasks ${fullWhere} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as any[];
+    return rows.map(r => this.toTask(r));
+  }
+
+  /** Check whether an agent has sufficient permission level. Returns null if OK, or an error message string. */
+  checkPermissionLevel(agent: Agent | undefined, required: PermissionLevel): string | null {
+    if (!agent) return 'Agent not found. Are you registered? Contact the project admin (Neil) to register.';
+
+    const current = agent.permissionLevel ?? 'task-any';
+    const currentOrd = PERMISSION_ORDER[current];
+    const requiredOrd = PERMISSION_ORDER[required];
+
+    if (currentOrd >= requiredOrd) return null;
+
+    return `权限不足：你的当前级别为「${current}」，此操作需要级别「${required}」。请联系 Neil（admin）在 WebUI 提升你的权限级别。`;
   }
 
   // ─── Agent Credentials CRUD ────────────────────────────────────────────────
@@ -1156,6 +1322,8 @@ export class TaskDB {
       status: row.status,
       metadata: row.metadata ?? undefined,
       capabilities: row.capabilities ? JSON.parse(row.capabilities) : undefined,
+      permissionLevel: row.permission_level as PermissionLevel | undefined,
+      visibilityScope: row.visibility_scope as VisibilityScope | undefined,
       rules: row.rules || undefined,
       createdAt: row.created_at,
     };

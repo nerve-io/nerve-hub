@@ -38,6 +38,16 @@ async function postAgent(id: string, extra?: Record<string, any>): Promise<any> 
 }
 
 describe("agent registry", () => {
+  test("registerAgent upsert preserves permission_level and visibility_scope", () => {
+    db.registerAgent({ id: "perm-preserve-1", name: "P1", type: "manual" });
+    db.updateAgentPermissions("perm-preserve-1", { visibilityScope: "own", permissionLevel: "readonly" });
+    db.registerAgent({ id: "perm-preserve-1", name: "P1-updated", type: "manual" });
+    const agent = db.getAgent("perm-preserve-1");
+    expect(agent?.name).toBe("P1-updated");
+    expect(agent?.visibilityScope).toBe("own");
+    expect(agent?.permissionLevel).toBe("readonly");
+  });
+
   test("POST /agents creates agent (201)", async () => {
     const { status, body } = await postAgent("test-agent-1");
     expect(status).toBe(201);
