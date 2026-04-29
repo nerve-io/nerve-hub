@@ -112,6 +112,8 @@ export interface EventFilter {
   projectId?: string;
   taskId?: string;
   limit?: number;
+  offset?: number;
+  assigneeFilter?: string;
 }
 
 export type BatchCompleteFn = (projectId: string, stats: { total: number; doneCount: number; failedCount: number }) => void;
@@ -529,24 +531,60 @@ export class TaskDB {
   getEvents(filter?: EventFilter): Event[] {
     const conditions: string[] = [];
     const params: any[] = [];
+    let fromClause = "events";
+    const joins: string[] = [];
+
+    if (filter?.assigneeFilter) {
+      joins.push("JOIN tasks ON events.task_id = tasks.id");
+      conditions.push("(tasks.assignee = ? OR events.task_id = '')");
+      params.push(filter.assigneeFilter);
+    }
 
     if (filter?.projectId) {
-      conditions.push("project_id = ?");
+      conditions.push("events.project_id = ?");
       params.push(filter.projectId);
     }
     if (filter?.taskId) {
-      conditions.push("task_id = ?");
+      conditions.push("events.task_id = ?");
       params.push(filter.taskId);
     }
 
+    const joinStr = joins.length > 0 ? " " + joins.join(" ") : "";
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const limit = Math.min(filter?.limit ?? 50, 200);
+    const offset = filter?.offset ?? 0;
 
     const rows = this.db.prepare(
-      `SELECT * FROM events ${where} ORDER BY created_at DESC LIMIT ?`
-    ).all(...params, limit) as any[];
+      `SELECT events.* FROM ${fromClause}${joinStr} ${where} ORDER BY events.created_at DESC LIMIT ? OFFSET ?`
+    ).all(...params, limit, offset) as any[];
 
     return rows.map(r => this.toEvent(r));
+  }
+
+  countEvents(filter?: { projectId?: string; taskId?: string; assigneeFilter?: string }): number {
+    const conditions: string[] = [];
+    const params: any[] = [];
+    let fromClause = "events";
+    const joins: string[] = [];
+
+    if (filter?.assigneeFilter) {
+      joins.push("JOIN tasks ON events.task_id = tasks.id");
+      conditions.push("(tasks.assignee = ? OR events.task_id = '')");
+      params.push(filter.assigneeFilter);
+    }
+    if (filter?.projectId) {
+      conditions.push("events.project_id = ?");
+      params.push(filter.projectId);
+    }
+    if (filter?.taskId) {
+      conditions.push("events.task_id = ?");
+      params.push(filter.taskId);
+    }
+
+    const joinStr = joins.length > 0 ? " " + joins.join(" ") : "";
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const row = this.db.prepare(`SELECT COUNT(*) as c FROM ${fromClause}${joinStr} ${where}`).get(...params) as any;
+    return row?.c ?? 0;
   }
 
   // ─── Project CRUD ───────────────────────────────────────────────────────
@@ -670,7 +708,7 @@ export class TaskDB {
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-    const limit = Math.min(filter?.limit ?? 10, 100);
+    const limit = Math.min(filter?.limit ?? 20, 100);
     const offset = filter?.offset ?? 0;
     const rows = this.db.prepare(`SELECT * FROM tasks ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as any[];
     return rows.map(r => this.toTask(r));
@@ -898,17 +936,20 @@ export class TaskDB {
 
   // ─── Contexts ───────────────────────────────────────────────────────────
 
-  getProjectContext(projectId: string): ProjectContext | undefined {
+  getProjectContext(projectId: string, taskLimit = 200): ProjectContext | undefined {
     const project = this.getProject(projectId);
     if (!project) return undefined;
 
-    const tasks = this.list({ projectId });
+    const tasks = this.list({ projectId, limit: taskLimit });
+    const total = (this.db.prepare("SELECT COUNT(*) as c FROM tasks WHERE project_id = ?").get(projectId) as any)?.c ?? tasks.length;
     const byStatus: Record<string, number> = {};
-    for (const task of tasks) {
-      byStatus[task.status] = (byStatus[task.status] || 0) + 1;
+    // stats use full counts, not just the loaded slice
+    const statusRows = this.db.prepare("SELECT status, COUNT(*) as c FROM tasks WHERE project_id = ? GROUP BY status").all(projectId) as any[];
+    for (const row of statusRows) {
+      byStatus[row.status] = row.c;
     }
 
-    return { project, tasks, stats: { total: tasks.length, byStatus } };
+    return { project, tasks, stats: { total, byStatus } };
   }
 
   getTaskContext(taskId: string): TaskContext | undefined {
@@ -1057,7 +1098,7 @@ export class TaskDB {
     }
 
     const fullWhere = `WHERE ${conditions.join(" AND ")}`;
-    const limit = Math.min(filter?.limit ?? 10, 100);
+    const limit = Math.min(filter?.limit ?? 20, 100);
     const offset = filter?.offset ?? 0;
     const rows = this.db.prepare(`SELECT * FROM tasks ${fullWhere} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as any[];
     return rows.map(r => this.toTask(r));
@@ -1074,6 +1115,17 @@ export class TaskDB {
     if (currentOrd >= requiredOrd) return null;
 
     return `权限不足：你的当前级别为「${current}」，此操作需要级别「${required}」。请联系 Neil（admin）在 WebUI 提升你的权限级别。`;
+  }
+
+  /** Check whether an agent can read a task given visibility scope.
+   *  Returns null if OK, or an error message string. */
+  checkTaskAccess(task: Task | null | undefined, agent: Agent | null | undefined): string | null {
+    if (!task) return 'task not found';
+    if (!agent) return null; // unauthenticated — allow (backward-compatible with legacy env-only mode)
+    if (agent.visibilityScope !== 'own') return null; // global scope sees everything
+    if (!task.assignee) return null; // unassigned tasks are visible to all
+    if (task.assignee === agent.id) return null; // own task
+    return `你的可见范围为「own」，无权查看此任务。当前任务接单人是「${task.assignee}」，需要「global」可见范围才能查看他人任务。请联系 Neil（admin）在 WebUI 调整你的 visibilityScope。`;
   }
 
   // ─── Agent Credentials CRUD ────────────────────────────────────────────────
@@ -1150,7 +1202,8 @@ export class TaskDB {
 
   // ─── Handoff Queue ────────────────────────────────────────────────────
 
-  getHandoffQueue(): Task[] {
+  getHandoffQueue(limit = 50, offset = 0): Task[] {
+    const cappedLimit = Math.min(limit, 200);
     const rows = this.db.prepare(`
       SELECT tasks.* FROM tasks
       JOIN agents ON tasks.assignee = agents.id
@@ -1159,7 +1212,8 @@ export class TaskDB {
       ORDER BY
         CASE tasks.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END,
         tasks.created_at ASC
-    `).all() as any[];
+      LIMIT ? OFFSET ?
+    `).all(cappedLimit, offset) as any[];
     return rows.map(r => this.toTask(r));
   }
 

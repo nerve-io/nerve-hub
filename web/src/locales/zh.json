@@ -63,6 +63,14 @@
     "no": "否",
     "optional": "可选",
     "markdownOptional": "（可选，Markdown）",
+    "loadMore": "加载更多",
+    "more": "更多",
+    "paginator": {
+      "showing": "显示",
+      "page": "第",
+      "of": "/",
+      "perPage": "每页"
+    },
     "copied": "已复制",
     "expand": "展开",
     "collapse": "收起",

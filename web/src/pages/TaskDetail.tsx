@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github.css';
 import { Pencil } from 'lucide-react';
-import { getTaskContext, updateTask, deleteTask, getTaskLog, createComment } from '../api';
+import { getTaskContext, updateTask, deleteTask, getTaskLog, createComment, listEvents } from '../api';
 import { toast, toastWithUndo } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -44,18 +44,39 @@ export function TaskDetail({ taskId }: Props) {
   const [descModalOpen, setDescModalOpen] = useState(false);
   const [descDraft, setDescDraft] = useState('');
   const [descSaving, setDescSaving] = useState(false);
+  const [eventsOffset, setEventsOffset] = useState(0);
+  const [eventsHasMore, setEventsHasMore] = useState(true);
+  const [loadingMoreEvents, setLoadingMoreEvents] = useState(false);
   const navigate = useNavigate();
 
   const load = useCallback(async () => {
     try {
       const data = await getTaskContext(taskId);
       setCtx(data);
+      setEventsOffset(data.events.length);
+      setEventsHasMore(data.events.length >= 20);
     } catch (err: any) {
       toast(err.message);
     } finally {
       setLoading(false);
     }
   }, [taskId]);
+
+  const loadMoreEvents = async () => {
+    setLoadingMoreEvents(true);
+    try {
+      const more = await listEvents({ taskId, limit: '20', offset: String(eventsOffset) });
+      if (ctx) {
+        setCtx({ ...ctx, events: [...ctx.events, ...more] });
+      }
+      setEventsOffset(prev => prev + more.length);
+      setEventsHasMore(more.length >= 20);
+    } catch (err: any) {
+      toast(err.message);
+    } finally {
+      setLoadingMoreEvents(false);
+    }
+  };
 
   const [logLines, setLogLines] = useState<string[] | null>(null);
 
@@ -409,6 +430,14 @@ export function TaskDetail({ taskId }: Props) {
                       </div>
                     </div>
                   ))
+                )}
+
+                {eventsHasMore && (
+                  <div className="flex justify-center pt-3 pb-1">
+                    <Button variant="ghost" size="sm" onClick={loadMoreEvents} disabled={loadingMoreEvents}>
+                      {loadingMoreEvents ? t('common.loading') : t('common.loadMore')}
+                    </Button>
+                  </div>
                 )}
               </div>
             </CardContent>

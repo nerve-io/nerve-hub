@@ -63,6 +63,14 @@
     "no": "No",
     "optional": "Optional",
     "markdownOptional": "(optional, Markdown)",
+    "loadMore": "Load more",
+    "more": "more",
+    "paginator": {
+      "showing": "Showing",
+      "page": "Page",
+      "of": "of",
+      "perPage": "Per page"
+    },
     "copied": "Copied",
     "expand": "Expand",
     "collapse": "Collapse",

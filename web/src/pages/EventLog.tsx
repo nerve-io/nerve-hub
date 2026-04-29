@@ -1,36 +1,62 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { listEvents, listProjects } from '../api';
+import { listEventsWithCount, listProjects } from '../api';
 import { toast } from '@/lib/toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Paginator } from '@/components/ui/paginator';
 import { relativeTime, absoluteTime, formatAction, getEventColor } from '../utils';
 import type { Event, Project } from '../types';
+
+const DEFAULT_PAGE_SIZE = 20;
 
 export function EventLog() {
   const { t } = useTranslation();
   const [events, setEvents] = useState<Event[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [filterProject, setFilterProject] = useState('all');
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState(0);
 
   const load = useCallback(async () => {
     try {
-      const params: Record<string, string> = { limit: '100' };
+      const params: Record<string, string> = { limit: String(pageSize), offset: String(offset) };
       if (filterProject && filterProject !== 'all') params.projectId = filterProject;
-      const [evts, projs] = await Promise.all([
-        listEvents(params),
+      const [{ items, total: t }, projs] = await Promise.all([
+        listEventsWithCount(params),
         listProjects(),
       ]);
-      setEvents(evts);
+      setEvents(items);
       setProjects(projs);
+      setTotal(t);
     } catch (err: any) {
       toast(err.message);
     }
-  }, [filterProject]);
+  }, [filterProject, pageSize, offset]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Reset offset when filter or pageSize changes
+  const handleFilterChange = (val: string) => {
+    setFilterProject(val);
+    setOffset(0);
+  };
+  const handlePageSizeChange = (size: number) => {
+    setPageSize(size);
+    setOffset(0);
+  };
+
+  const hasMore = offset + pageSize < total;
+
+  const paginatorLabels = {
+    showing: t('common.paginator.showing'),
+    page: t('common.paginator.page'),
+    of: t('common.paginator.of'),
+    perPage: t('common.paginator.perPage'),
+  };
 
   return (
     <div className="page-shell">
@@ -38,7 +64,7 @@ export function EventLog() {
         <div>
           <h1 className="page-title">{t('page.eventLog')}</h1>
         </div>
-        <Select value={filterProject} onValueChange={setFilterProject}>
+        <Select value={filterProject} onValueChange={handleFilterChange}>
           <SelectTrigger className="h-9 w-full sm:w-[260px]">
             <SelectValue placeholder={t('eventLog.filterAllProjects')} />
           </SelectTrigger>
@@ -60,12 +86,11 @@ export function EventLog() {
         <div className="surface-card flex flex-col p-4">
           {events.map((event, index) => {
             const eventColor = getEventColor(event.action);
-            const hasResult = event.action === 'task.completed';
             let resultSummary = '';
 
             try {
               const payload = JSON.parse(event.payload);
-              if (hasResult && payload.result) {
+              if (payload.result) {
                 resultSummary = payload.result.substring(0, 50) + (payload.result.length > 50 ? '...' : '');
               }
             } catch {
@@ -111,6 +136,17 @@ export function EventLog() {
               </div>
             );
           })}
+
+          <Paginator
+            pageSize={pageSize}
+            offset={offset}
+            total={total}
+            hasMore={hasMore}
+            onPageSizeChange={handlePageSizeChange}
+            onPrev={() => setOffset(prev => Math.max(0, prev - pageSize))}
+            onNext={() => setOffset(prev => prev + pageSize)}
+            labels={paginatorLabels}
+          />
         </div>
       )}
     </div>

@@ -22,18 +22,25 @@ const STATUS_STYLES: Record<string, string> = {
   done: 'text-green-400',
 };
 
+const PAGE_SIZE = 30;
+
 export function HandoffQueue() {
   const { t } = useTranslation();
   const [tasks, setTasks] = useState<any[]>([]);
   const [copyingId, setCopyingId] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [notifyEnabled, setNotifyEnabled] = useState(() => {
     try { return localStorage.getItem('notifyHandoff') === 'true'; } catch { return false; }
   });
 
   const load = useCallback(async () => {
     try {
-      const data = await getHandoffQueue();
+      const data = await getHandoffQueue({ limit: String(PAGE_SIZE), offset: '0' });
       setTasks(data);
+      setOffset(data.length);
+      setHasMore(data.length >= PAGE_SIZE);
     } catch (err: any) {
       toast(err.message);
     }
@@ -44,6 +51,20 @@ export function HandoffQueue() {
   }, [load]);
 
   useRealtimeSync(null, load);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const more = await getHandoffQueue({ limit: String(PAGE_SIZE), offset: String(offset) });
+      setTasks(prev => [...prev, ...more]);
+      setOffset(prev => prev + more.length);
+      setHasMore(more.length >= PAGE_SIZE);
+    } catch (err: any) {
+      toast(err.message);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const handleEnableNotify = async () => {
     try {
@@ -128,6 +149,14 @@ export function HandoffQueue() {
               </div>
             </div>
           ))}
+
+          {hasMore && (
+            <div className="flex justify-center pt-2">
+              <Button variant="ghost" size="sm" onClick={loadMore} disabled={loadingMore}>
+                {loadingMore ? t('common.loading') : t('common.loadMore')}
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>

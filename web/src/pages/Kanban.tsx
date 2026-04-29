@@ -19,6 +19,8 @@ import type { Task, TaskStatus, TaskPriority, TaskType } from '../types';
 const STATUSES: TaskStatus[] = ['pending', 'running', 'blocked', 'done', 'failed'];
 const PRIORITIES: TaskPriority[] = ['critical', 'high', 'medium', 'low'];
 const TYPES: TaskType[] = ['code', 'review', 'test', 'deploy', 'research', 'custom'];
+const PAGE_SIZES = [10, 20, 50];
+const DEFAULT_PAGE_SIZE = 20;
 
 interface Props {
   projectId: string;
@@ -49,6 +51,10 @@ export function Kanban({ projectId }: Props) {
   const [filterAssignee, setFilterAssignee] = useState('');
   const [filterType, setFilterType] = useState<TaskType | 'all'>('all');
   const [filterPriority, setFilterPriority] = useState<TaskPriority | 'all'>('all');
+
+  // Pagination
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [expandedCols, setExpandedCols] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     try {
@@ -174,10 +180,13 @@ export function Kanban({ projectId }: Props) {
 
   const hasFilter = filterAssignee !== '' || filterType !== 'all' || filterPriority !== 'all';
 
-  const columns = STATUSES.map((status) => ({
-    status,
-    tasks: filteredTasks.filter((t) => t.status === status),
-  }));
+  const columns = STATUSES.map((status) => {
+    const allInCol = filteredTasks.filter((t) => t.status === status);
+    const expanded = expandedCols[status] === true;
+    const visibleTasks = expanded ? allInCol : allInCol.slice(0, pageSize);
+    const hiddenCount = allInCol.length - visibleTasks.length;
+    return { status, allCount: allInCol.length, visibleTasks, hiddenCount };
+  });
 
   return (
     <div className="flex h-[calc(100vh-6rem)] min-h-[620px] flex-col">
@@ -240,6 +249,20 @@ export function Kanban({ projectId }: Props) {
             ✕ {t('kanban.clearFilters')}
           </Button>
         )}
+
+        <div className="ml-auto flex items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">{t('common.paginator.perPage')}</span>
+          <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setExpandedCols({}); }}>
+            <SelectTrigger className="h-8 w-[65px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PAGE_SIZES.map((s) => (
+                <SelectItem key={s} value={String(s)}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="flex flex-1 gap-4 overflow-x-auto overflow-y-hidden pb-3">
@@ -261,7 +284,7 @@ export function Kanban({ projectId }: Props) {
                 />
                 {taskStatusLabel(col.status)}
                 <Badge variant="secondary" className="ml-1 bg-background/70 text-xs font-medium">
-                  {col.tasks.length}
+                  {col.allCount}
                 </Badge>
               </div>
               <Button
@@ -277,11 +300,13 @@ export function Kanban({ projectId }: Props) {
               </Button>
             </div>
             <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-3">
-              {col.tasks.length === 0 ? (
+              {col.visibleTasks.length === 0 ? (
                 <div className="muted-panel flex min-h-[120px] items-center justify-center px-4 text-center text-sm text-muted-foreground">
                   {hasFilter ? t('kanban.noFilteredTasks') : t('kanban.emptyColumn')}
                 </div>
-              ) : col.tasks.map((task) => {
+              ) : (
+                <>
+                  {col.visibleTasks.map((task) => {
                 const blocked = blockedByMap[task.id] === true;
                 const assigneeStr = task.assignee?.trim() ?? '';
                 const creatorStr = task.creator?.trim() ?? '';
@@ -348,6 +373,19 @@ export function Kanban({ projectId }: Props) {
                   </Link>
                 );
               })}
+
+                  {col.hiddenCount > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs text-muted-foreground self-center"
+                      onClick={() => setExpandedCols(prev => ({ ...prev, [col.status]: true }))}
+                    >
+                      + {col.hiddenCount} {t('common.more')}
+                    </Button>
+                  )}
+                </>
+              )}
             </div>
           </div>
         ))}

@@ -26,6 +26,29 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+async function requestWithCount<T>(path: string, options?: RequestInit): Promise<{ items: T; total: number }> {
+  const headers = new Headers(options?.headers);
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  try {
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem(TOKEN_STORAGE_KEY) : null;
+    if (token && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+  } catch {
+    /* private mode */
+  }
+  const res = await fetch(`${BASE}${path}`, { ...options, headers });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
+  const items = await res.json() as T;
+  const total = parseInt(res.headers.get('X-Total-Count') || '0', 10);
+  return { items, total };
+}
+
 /** Web UI：读写浏览器中的 MCP token，用于需要鉴权的 API（如 PATCH /agents/:id） */
 export function getStoredHubToken(): string | null {
   try {
@@ -127,6 +150,11 @@ export const listEvents = (params?: Record<string, string>) => {
   return request<Event[]>(`/events${qs}`);
 };
 
+export const listEventsWithCount = (params?: Record<string, string>) => {
+  const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+  return requestWithCount<Event[]>(`/events${qs}`);
+};
+
 // ─── Agents ──────────────────────────────────────────────────────────────────
 
 import type { Agent, AgentStatus, PermissionLevel, VisibilityScope } from './types';
@@ -164,5 +192,8 @@ export const issueAgentCredential = (agentId: string) =>
 
 // ─── Handoff Queue ──────────────────────────────────────────────────────────
 
-export const getHandoffQueue = () => request<any[]>('/handoff');
+export const getHandoffQueue = (params?: Record<string, string>) => {
+  const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+  return request<any[]>(`/handoff${qs}`);
+};
 export const getTaskBriefing = (taskId: string) => request<{ taskId: string; briefing: string }>(`/tasks/${taskId}/briefing`);

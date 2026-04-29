@@ -192,3 +192,88 @@ describe("agent registry", () => {
     ws.close();
   });
 });
+
+// ─── Security: task visibility bypass guards ──────────────────────────────────
+
+describe("task visibility (checkTaskAccess)", () => {
+  test("own scope agent can read own task", () => {
+    db.registerAgent({ id: "sec-own", name: "Own Agent", type: "manual", permissionLevel: "task-self", visibilityScope: "own" });
+    const project = db.createProject({ name: "sec-proj" });
+    const task = db.create({ title: "own task", projectId: project.id, assignee: "sec-own" });
+    const agent = db.getAgent("sec-own");
+    const err = db.checkTaskAccess(task, agent);
+    expect(err).toBeNull();
+  });
+
+  test("own scope agent cannot read another assignee task", () => {
+    const agent = db.getAgent("sec-own");
+    const task = db.create({ title: "other task", projectId: "p", assignee: "someone-else" });
+    const err = db.checkTaskAccess(task, agent);
+    expect(err).not.toBeNull();
+    expect(err).toContain("own");
+  });
+
+  test("own scope agent can read unassigned task", () => {
+    const agent = db.getAgent("sec-own");
+    const task = db.create({ title: "open task", projectId: "p", assignee: "" });
+    const err = db.checkTaskAccess(task, agent);
+    expect(err).toBeNull();
+  });
+
+  test("global scope agent can read any task", () => {
+    db.registerAgent({ id: "sec-global", name: "Global Agent", type: "manual", permissionLevel: "task-any", visibilityScope: "global" });
+    const agent = db.getAgent("sec-global");
+    const task = db.create({ title: "any task", projectId: "p", assignee: "other-guy" });
+    const err = db.checkTaskAccess(task, agent);
+    expect(err).toBeNull();
+  });
+
+  test("null agent (legacy unauthenticated) can read any task", () => {
+    const task = db.create({ title: "legacy task", projectId: "p", assignee: "someone" });
+    const err = db.checkTaskAccess(task, null);
+    expect(err).toBeNull();
+  });
+});
+
+describe("agent visibility (list_agents / get_agent_rules)", () => {
+  test("checkPermissionLevel enforces admin requirement", () => {
+    db.registerAgent({ id: "sec-low", name: "Low", type: "manual", permissionLevel: "task-self" });
+    const agent = db.getAgent("sec-low");
+    const err = db.checkPermissionLevel(agent, 'admin');
+    expect(err).not.toBeNull();
+    expect(err).toContain("admin");
+  });
+
+  test("checkPermissionLevel allows admin for admin", () => {
+    db.registerAgent({ id: "sec-admin2", name: "Admin2", type: "manual", permissionLevel: "admin" });
+    const agent = db.getAgent("sec-admin2");
+    const err = db.checkPermissionLevel(agent, 'admin');
+    expect(err).toBeNull();
+  });
+});
+
+describe("event visibility (getEvents with assigneeFilter)", () => {
+  test("getEvents filters by assignee when assigneeFilter set", () => {
+    const project = db.createProject({ name: "evt-proj" });
+    const t1 = db.create({ title: "Alice task", projectId: project.id, assignee: "alice" });
+    const t2 = db.create({ title: "Bob task", projectId: project.id, assignee: "bob" });
+    // Log events for both
+    db.update(t1.id, { status: "running" });
+    db.update(t2.id, { status: "running" });
+
+    const allEvents = db.getEvents({ projectId: project.id });
+    expect(allEvents.length).toBeGreaterThanOrEqual(2);
+
+    const aliceEvents = db.getEvents({ projectId: project.id, assigneeFilter: "alice" });
+    for (const e of aliceEvents) {
+      if (e.taskId) {
+        const task = db.get(e.taskId);
+        if (task && task.assignee) {
+          expect(task.assignee).toBe("alice");
+        }
+      }
+    }
+    // Should see at least alice's task.created + task.updated
+    expect(aliceEvents.length).toBeGreaterThanOrEqual(2);
+  });
+});

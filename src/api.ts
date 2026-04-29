@@ -373,11 +373,20 @@ export function createServer(db: TaskDB, port = 3141) {
           const projectId = url.searchParams.get("projectId") || undefined;
           const taskId = url.searchParams.get("taskId") || undefined;
           const limitParam = url.searchParams.get("limit");
+          const offsetParam = url.searchParams.get("offset");
           const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+          const offset = offsetParam ? parseInt(offsetParam, 10) : undefined;
           if (limitParam && (isNaN(limit!) || limit! < 1)) {
             return badRequest("limit must be a positive integer");
           }
-          return Response.json(db.getEvents({ projectId, taskId, limit }));
+          if (offsetParam && (isNaN(offset!) || offset! < 0)) {
+            return badRequest("offset must be a non-negative integer");
+          }
+          const events = db.getEvents({ projectId, taskId, limit, offset });
+          const total = db.countEvents({ projectId, taskId });
+          return new Response(JSON.stringify(events), {
+            headers: { "Content-Type": "application/json", "X-Total-Count": String(total) },
+          });
         }
 
         // ─── POST /projects ─────────────────────────────────────────────
@@ -436,7 +445,9 @@ export function createServer(db: TaskDB, port = 3141) {
         // ─── GET /projects/:id/context ──────────────────────────────────
         const projectContextMatch = path.match(/^\/projects\/([^/]+)\/context$/);
         if (projectContextMatch && req.method === "GET") {
-          const ctx = db.getProjectContext(projectContextMatch[1]);
+          const limitParam = url.searchParams.get("limit");
+          const limit = limitParam ? parseInt(limitParam, 10) : 200;
+          const ctx = db.getProjectContext(projectContextMatch[1], limit);
           if (!ctx) return Response.json({ error: "not found" }, { status: 404 });
           return Response.json(ctx);
         }
@@ -842,7 +853,17 @@ export function createServer(db: TaskDB, port = 3141) {
 
         // GET /handoff
         if (path === "/handoff" && req.method === "GET") {
-          return Response.json(db.getHandoffQueue());
+          const limitParam = url.searchParams.get("limit");
+          const offsetParam = url.searchParams.get("offset");
+          const limit = limitParam ? parseInt(limitParam, 10) : 50;
+          const offset = offsetParam ? parseInt(offsetParam, 10) : 0;
+          if (limitParam && (isNaN(limit) || limit < 1)) {
+            return badRequest("limit must be a positive integer");
+          }
+          if (offsetParam && (isNaN(offset) || offset < 0)) {
+            return badRequest("offset must be a non-negative integer");
+          }
+          return Response.json(db.getHandoffQueue(limit, offset));
         }
 
         // GET /tasks/:id/briefing
