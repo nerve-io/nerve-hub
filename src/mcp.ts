@@ -159,7 +159,13 @@ const TYPE_ENUM = z.enum(["code", "review", "test", "deploy", "research", "custo
 export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { name?: string }) {
   let _toolCount = 0;
   let _totalDescChars = 0;
-  const actor = agentInfo.name || "mcp-agent";
+
+  /** Resolve the best actor name at invocation time from token identity, falling back to env/legacy. */
+  function resolveActorName(): string {
+    const identity = resolveAgentIdentity(db, agentInfo);
+    if (identity) return identity.agent.name || identity.agentId;
+    return agentInfo.name || "mcp-agent";
+  }
 
   // ─── Core Task Tools ───────────────────────────────────────────────────
 
@@ -177,8 +183,10 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       creator: z.string().optional(),
     },
     async (args) => {
-      const creator = args.creator || agentInfo.name || undefined;
-      const task = db.create({ title: args.title, projectId: args.projectId, description: args.description, priority: args.priority, type: args.type, assignee: args.assignee, dependencies: args.dependencies, creator }, actor);
+      const identity = resolveAgentIdentity(db, agentInfo);
+      const resolvedName = identity?.agent?.name || identity?.agentId || agentInfo.name || "mcp-agent";
+      const creator = args.creator || identity?.agent?.name || identity?.agentId || agentInfo.name || undefined;
+      const task = db.create({ title: args.title, projectId: args.projectId, description: args.description, priority: args.priority, type: args.type, assignee: args.assignee, dependencies: args.dependencies, creator }, resolvedName);
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     }
   );
@@ -202,7 +210,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
         const permError = db.checkPermissionLevel(identity.agent, 'task-any');
         if (permError) return { content: [{ type: "text" as const, text: permError }], isError: true };
       }
-      const task = db.update(args.id, { status: "done", result: args.result }, actor);
+      const task = db.update(args.id, { status: "done", result: args.result }, resolveActorName());
       if (!task) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     }
@@ -243,7 +251,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
         const permError = db.checkPermissionLevel(identity.agent, 'task-self');
         if (permError) return { content: [{ type: "text" as const, text: permError }], isError: true };
       }
-      const task = db.update(args.id, { status: "running", assignee: args.assignee }, actor);
+      const task = db.update(args.id, { status: "running", assignee: args.assignee }, resolveActorName());
       if (!task) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     }
@@ -284,7 +292,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
           if (permError) return { content: [{ type: "text" as const, text: permError }], isError: true };
         }
       }
-      const task = db.update(id, updates, actor);
+      const task = db.update(id, updates, resolveActorName());
       if (!task) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     }
@@ -761,7 +769,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
     },
     async (args) => {
       try {
-        const comment = db.createComment({ taskId: args.task_id, body: args.body }, actor);
+        const comment = db.createComment({ taskId: args.task_id, body: args.body }, resolveActorName());
         return { content: [{ type: "text" as const, text: JSON.stringify(comment, null, 2) }] };
       } catch (err: any) {
         return { content: [{ type: "text" as const, text: `Error: ${err.message}` }], isError: true };
@@ -815,7 +823,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       id: z.string(),
     },
     async (args) => {
-      const ok = db.delete(args.id, actor);
+      const ok = db.delete(args.id, resolveActorName());
       if (!ok) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
       return { content: [{ type: "text" as const, text: "Deleted" }] };
     }
@@ -830,7 +838,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       comment_id: z.string(),
     },
     async (args) => {
-      const ok = db.deleteComment(args.comment_id, actor);
+      const ok = db.deleteComment(args.comment_id, resolveActorName());
       if (!ok) return { content: [{ type: "text" as const, text: "Error: comment not found" }], isError: true };
       return { content: [{ type: "text" as const, text: "Deleted" }] };
     }
