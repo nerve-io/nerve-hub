@@ -16,6 +16,7 @@ import { startInboxWatcher } from "./inbox.js";
 import { wakeClaudeDesktop } from "./wake-claude.js";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { homedir } from "os";
 
 // Use the directory of this source file, NOT process.cwd().
 // Claude Desktop spawns MCP processes with cwd=/, which is read-only on macOS.
@@ -23,8 +24,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // NERVE_DB_PATH lets a compiled binary and a dev server share one database.
 // Default: <project-root>/.nerve/hub.db (relative to source file location).
+// Expands leading ~ in NERVE_DB_PATH (shell tilde expansion doesn't happen in env vars).
 const DB_PATH = process.env.NERVE_DB_PATH
-  ?? resolve(__dirname, "..", ".nerve", "hub.db");
+  ? resolve(process.env.NERVE_DB_PATH.replace(/^~(?=$|\/)/, homedir()))
+  : resolve(__dirname, "..", ".nerve", "hub.db");
 
 // ─── Minimal argv parser (no dependencies) ──────────────────────────────────
 

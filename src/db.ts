@@ -160,12 +160,32 @@ const PERMISSION_ORDER: Record<PermissionLevel, number> = {
   'admin': 3,
 };
 
+const VALID_TASK_TYPES: TaskType[] = ['code', 'review', 'test', 'deploy', 'research', 'custom'];
+
 export interface AgentCapabilities {
-  taskTypes?: string[];
+  taskTypes?: TaskType[];
   languages?: string[];
-  priorities?: string[];
   description?: string;
+  meta?: Record<string, unknown>;
   [key: string]: unknown;
+}
+
+export function validateCapabilities(capabilities: AgentCapabilities | undefined): string | null {
+  if (!capabilities) return null;
+  if (capabilities.taskTypes !== undefined) {
+    if (!Array.isArray(capabilities.taskTypes)) {
+      return "taskTypes must be an array";
+    }
+    for (const taskType of capabilities.taskTypes) {
+      if (!VALID_TASK_TYPES.includes(taskType as TaskType)) {
+        return `Invalid taskType: "${taskType}". Must be one of: ${VALID_TASK_TYPES.join(', ')}`;
+      }
+    }
+  }
+  if (capabilities.languages !== undefined && !Array.isArray(capabilities.languages)) {
+    return "languages must be an array";
+  }
+  return null;
 }
 
 export interface Agent {
@@ -580,6 +600,12 @@ export class TaskDB {
     return rows.map(r => this.toEvent(r));
   }
 
+  /** Single event by primary key (for WebUI detail route). */
+  getEvent(id: string): Event | undefined {
+    const row = this.db.prepare("SELECT * FROM events WHERE id = ?").get(id) as any;
+    return row ? this.toEvent(row) : undefined;
+  }
+
   countEvents(filter?: { projectId?: string; taskId?: string; assigneeFilter?: string }): number {
     const conditions: string[] = [];
     const params: any[] = [];
@@ -728,6 +754,17 @@ export class TaskDB {
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const limit = Math.min(filter?.limit ?? 20, 100);
+    const offset = filter?.offset ?? 0;
+    const rows = this.db.prepare(`SELECT * FROM tasks ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as any[];
+    return rows.map(r => this.toTask(r));
+  }
+
+  listExcludingDone(filter: any): Task[] {
+    const conditions: string[] = ["status NOT IN ('done', 'failed')"];
+    const params: any[] = [];
+    if (filter?.projectId) { conditions.push("project_id = ?"); params.push(filter.projectId); }
+    const where = `WHERE ${conditions.join(" AND ")}`;
+    const limit = Math.min(filter?.limit ?? 200, 200);
     const offset = filter?.offset ?? 0;
     const rows = this.db.prepare(`SELECT * FROM tasks ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as any[];
     return rows.map(r => this.toTask(r));
@@ -955,11 +992,24 @@ export class TaskDB {
 
   // ─── Contexts ───────────────────────────────────────────────────────────
 
-  getProjectContext(projectId: string, taskLimit = 200): ProjectContext | undefined {
+  getProjectContext(projectId: string, taskLimit = 200, excludeDone = false): ProjectContext | undefined {
     const project = this.getProject(projectId);
     if (!project) return undefined;
 
-    const tasks = this.list({ projectId, limit: taskLimit });
+    const filter: any = { projectId, limit: taskLimit };
+    if (excludeDone) {
+      // Fetch non-done tasks for the tasks array; stats still cover all statuses
+      const tasks = this.listExcludingDone(filter);
+      const total = (this.db.prepare("SELECT COUNT(*) as c FROM tasks WHERE project_id = ?").get(projectId) as any)?.c ?? 0;
+      const byStatus: Record<string, number> = {};
+      const statusRows = this.db.prepare("SELECT status, COUNT(*) as c FROM tasks WHERE project_id = ? GROUP BY status").all(projectId) as any[];
+      for (const row of statusRows) {
+        byStatus[row.status] = row.c;
+      }
+      return { project, tasks, stats: { total, byStatus } };
+    }
+
+    const tasks = this.list(filter);
     const total = (this.db.prepare("SELECT COUNT(*) as c FROM tasks WHERE project_id = ?").get(projectId) as any)?.c ?? tasks.length;
     const byStatus: Record<string, number> = {};
     // stats use full counts, not just the loaded slice
@@ -996,6 +1046,25 @@ export class TaskDB {
     permissionLevel?: PermissionLevel;
     visibilityScope?: VisibilityScope;
   }): Agent {
+    let capabilitiesObj: AgentCapabilities | undefined;
+    
+    if (input.capabilities) {
+      if (typeof input.capabilities === "string") {
+        try {
+          capabilitiesObj = JSON.parse(input.capabilities);
+        } catch {
+          throw new Error("Invalid capabilities JSON");
+        }
+      } else {
+        capabilitiesObj = input.capabilities;
+      }
+      
+      const validationError = validateCapabilities(capabilitiesObj);
+      if (validationError) {
+        throw new Error(`Invalid capabilities: ${validationError}`);
+      }
+    }
+    
     const now = new Date().toISOString();
     this.db.prepare(`
       INSERT INTO agents (id, name, type, endpoint, heartbeat_interval, last_seen, status, metadata, capabilities, permission_level, visibility_scope, created_at)
@@ -1014,9 +1083,7 @@ export class TaskDB {
       input.endpoint ?? null,
       input.heartbeatInterval ?? null,
       input.metadata ?? null,
-      input.capabilities
-        ? (typeof input.capabilities === "string" ? input.capabilities : JSON.stringify(input.capabilities))
-        : null,
+      capabilitiesObj ? JSON.stringify(capabilitiesObj) : null,
       input.permissionLevel ?? 'task-any',
       input.visibilityScope ?? 'global',
       now,

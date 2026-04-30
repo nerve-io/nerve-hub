@@ -23,6 +23,7 @@
  *   GET    /agents/:id/rules  — get Agent rules (纯文本)
  *
  * Events:
+ *   GET    /events/:id        — single event
  *   GET    /events            — list events (?projectId=&taskId=&limit=)
  *
  * Stats:
@@ -371,6 +372,14 @@ export function createServer(db: TaskDB, port = 3141) {
           return new Response("Method not allowed", { status: 405 });
         }
 
+        // ─── GET /events/:id ────────────────────────────────────────────
+        const eventGetMatch = path.match(/^\/events\/([^/]+)$/);
+        if (eventGetMatch && req.method === "GET") {
+          const ev = db.getEvent(eventGetMatch[1]);
+          if (!ev) return Response.json({ error: "not found" }, { status: 404 });
+          return Response.json(ev);
+        }
+
         // ─── GET /events ────────────────────────────────────────────────
         if (path === "/events" && req.method === "GET") {
           const projectId = url.searchParams.get("projectId") || undefined;
@@ -445,7 +454,7 @@ export function createServer(db: TaskDB, port = 3141) {
 
           const body = await json(req).catch(() => ({}));
           const backupPath = db.backup(body?.targetDir);
-          broadcast({ type: "backup.created", path: backupPath });
+          broadcast({ type: "backup.created" });
           return Response.json({ path: backupPath });
         }
 
@@ -545,6 +554,14 @@ export function createServer(db: TaskDB, port = 3141) {
           if (body.dependencies !== undefined) {
             const depError = db.validateDependencies(null, body.dependencies);
             if (depError) return badRequest(depError);
+          }
+          // Auto-fill projectId when exactly one project exists
+          if (!body.projectId) {
+            const projects = db.listProjects();
+            if (projects.length === 1) {
+              body.projectId = projects[0].id;
+            }
+            // >1 projects: keep empty (backward-compatible, MCP path is stricter)
           }
           const actor = getActor(req);
           const task = db.create(body as CreateTaskInput, actor);

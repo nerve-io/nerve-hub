@@ -26,7 +26,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { dirname, join } from "path";
 import { homedir } from "os";
 import { createHash } from "crypto";
-import type { TaskDB } from "./db.js";
+import type { TaskDB, Task } from "./db.js";
 
 // ─── Token Helpers ──────────────────────────────────────────────────────────
 
@@ -152,6 +152,14 @@ function offloadIfLong(content: string, filename: string): string {
   return `[内容较长，已写入本地文件，请用文件读取工具读取完整内容]\n文件路径：${filePath}`;
 }
 
+function toSlimTask(t: Task) {
+  return {
+    id: t.id, title: t.title, status: t.status, priority: t.priority,
+    type: t.type, assignee: t.assignee, dependencies: t.dependencies,
+    projectId: t.projectId, createdAt: t.createdAt, updatedAt: t.updatedAt,
+  };
+}
+
 const STATUS_ENUM = z.enum(["pending", "running", "done", "failed", "blocked"]);
 const PRIORITY_ENUM = z.enum(["critical", "high", "medium", "low"]);
 const TYPE_ENUM = z.enum(["code", "review", "test", "deploy", "research", "custom"]);
@@ -195,7 +203,23 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       const identity = resolveAgentIdentity(db, agentInfo);
       const resolvedName = identity?.agent?.name || identity?.agentId || agentInfo.name || "mcp-agent";
       const creator = args.creator || identity?.agent?.name || identity?.agentId || agentInfo.name || undefined;
-      const task = db.create({ title: args.title, projectId: args.projectId, description: args.description, priority: args.priority, type: args.type, assignee: args.assignee, dependencies: args.dependencies, creator }, resolvedName);
+      // Auto-fill projectId when not provided (方案C)
+      let projectId = args.projectId;
+      if (!projectId) {
+        const projects = db.listProjects();
+        if (projects.length === 1) {
+          projectId = projects[0].id;
+        } else if (projects.length > 1) {
+          return {
+            content: [{ type: "text" as const, text:
+              `Error: projectId is required when multiple projects exist. ` +
+              `Available: ${projects.map(p => `${p.name} (${p.id})`).join(", ")}`
+            }],
+            isError: true
+          };
+        }
+      }
+      const task = db.create({ title: args.title, projectId, description: args.description, priority: args.priority, type: args.type, assignee: args.assignee, dependencies: args.dependencies, creator }, resolvedName);
       return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
     }
   );
@@ -265,7 +289,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       }
       const task = db.update(args.id, { status: "running", assignee: args.assignee }, resolveActorName());
       if (!task) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
-      return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ id: task.id, title: task.title, status: task.status, assignee: task.assignee, updatedAt: task.updatedAt }, null, 2) }] };
     }
   );
   _toolCount++;
@@ -307,7 +331,8 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       }
       const task = db.update(id, updates, resolveActorName());
       if (!task) return { content: [{ type: "text" as const, text: "Error: not found" }], isError: true };
-      return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
+      const modifiedFields = Object.keys(updates).filter(k => updates[k] !== undefined);
+      return { content: [{ type: "text" as const, text: JSON.stringify({ id: task.id, title: task.title, status: task.status, assignee: task.assignee, updatedAt: task.updatedAt, modified: modifiedFields }, null, 2) }] };
     }
   );
   _toolCount++;
@@ -351,7 +376,8 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       const identity = resolveAgentIdentity(db, agentInfo);
       const filter = { projectId: args.projectId, status: args.status, priority: args.priority, type: args.type, assignee: args.assignee, limit: args.limit, offset: args.offset };
       const tasks = db.listTasksWithScope(filter, identity?.agentId, identity?.agent?.visibilityScope);
-      return { content: [{ type: "text" as const, text: JSON.stringify(tasks, null, 2) }] };
+      const result = JSON.stringify(tasks.map(toSlimTask));
+      return { content: [{ type: "text" as const, text: offloadIfLong(result, "list-tasks.json") }] };
     }
   );
   _toolCount++;
@@ -437,7 +463,8 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       recordCall("search_tasks");
       const identity = resolveAgentIdentity(db, agentInfo);
       const tasks = db.listTasksWithScope({ search: args.query, projectId: args.project_id }, identity?.agentId, identity?.agent?.visibilityScope);
-      return { content: [{ type: "text" as const, text: JSON.stringify(tasks, null, 2) }] };
+      const result = JSON.stringify(tasks.map(toSlimTask));
+      return { content: [{ type: "text" as const, text: offloadIfLong(result, "search-tasks.json") }] };
     }
   );
   _toolCount++;
@@ -495,13 +522,14 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
 
   server.tool(
     "get_project_context",
-    "Get project context: project info, all tasks, and status statistics. Use this to inject project state into a new conversation.",
+    "Get project context: project info, all tasks, and status statistics. Set excludeDone=true to omit done/failed tasks from the tasks array (stats still cover all statuses).",
     {
       projectId: z.string(),
+      excludeDone: z.boolean().optional(),
     },
     async (args) => {
       recordCall("get_project_context");
-      const ctx = db.getProjectContext(args.projectId);
+      const ctx = db.getProjectContext(args.projectId, 200, args.excludeDone ?? false);
       if (!ctx) return { content: [{ type: "text" as const, text: "Error: project not found" }], isError: true };
       return { content: [{ type: "text" as const, text: JSON.stringify(ctx, null, 2) }] };
     }
@@ -512,6 +540,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
   // ─── Agent Tools ───────────────────────────────────────────────────────
 
   const AGENT_TYPE_ENUM = z.enum(["webhook", "manual"]);
+  const TASK_TYPE_ENUM = z.enum(["code", "review", "test", "deploy", "research", "custom"]);
 
   server.tool(
     "register_agent",
@@ -523,6 +552,9 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       endpoint: z.string().optional(),
       heartbeat_interval: z.number().optional(),
       metadata: z.string().optional(),
+      task_types: z.array(TASK_TYPE_ENUM).optional(),
+      languages: z.array(z.string()).optional(),
+      description: z.string().optional(),
       capabilities: z.string().optional(),
       permission_level: z.enum(["readonly", "task-self", "task-any", "admin"]).optional(),
       visibility_scope: z.enum(["own", "global"]).optional(),
@@ -532,6 +564,18 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
       // Non-admin agents cannot set permissionLevel or visibilityScope
       const identity = resolveAgentIdentity(db, agentInfo);
       const isAdmin = identity && db.checkPermissionLevel(identity.agent, 'admin') === null;
+      
+      let capabilities: any = undefined;
+      if (args.capabilities) {
+        capabilities = args.capabilities;
+      } else if (args.task_types || args.languages || args.description) {
+        capabilities = {
+          taskTypes: args.task_types,
+          languages: args.languages,
+          description: args.description,
+        };
+      }
+      
       const agent = db.registerAgent({
         id: args.id,
         name: args.name,
@@ -539,7 +583,7 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
         endpoint: args.endpoint,
         heartbeatInterval: args.heartbeat_interval,
         metadata: args.metadata,
-        capabilities: args.capabilities,
+        capabilities,
         permissionLevel: isAdmin ? args.permission_level : undefined,
         visibilityScope: isAdmin ? args.visibility_scope : undefined,
       });
@@ -551,18 +595,22 @@ export function registerMcpTools(server: McpServer, db: TaskDB, agentInfo: { nam
 
   server.tool(
     "list_agents",
-    "List all registered Agents and their current status",
+    "List all registered Agents (discovery endpoint — does not expose rules, endpoint, or permission details). All authenticated agents can call this.",
     {},
     async () => {
       recordCall("list_agents");
-      const identity = resolveAgentIdentity(db, agentInfo);
       const agents = db.listAgents();
-      // For own visibility scope, only return the calling agent
-      if (identity?.agent?.visibilityScope === 'own' && identity.agentId) {
-        const self = agents.filter(a => a.id === identity.agentId);
-        return { content: [{ type: "text" as const, text: JSON.stringify(self, null, 2) }] };
-      }
-      return { content: [{ type: "text" as const, text: JSON.stringify(agents, null, 2) }] };
+      const slim = agents.map(a => ({
+        id: a.id,
+        name: a.name,
+        type: a.type,
+        status: a.status,
+        lastSeen: a.lastSeen ?? null,
+        taskTypes: a.capabilities?.taskTypes ?? [],
+        languages: a.capabilities?.languages ?? [],
+        description: a.capabilities?.description ?? "",
+      }));
+      return { content: [{ type: "text" as const, text: JSON.stringify(slim, null, 2) }] };
     }
   );
   _toolCount++;
